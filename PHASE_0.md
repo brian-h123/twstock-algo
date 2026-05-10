@@ -22,15 +22,14 @@ Phase 0 is complete when **all** of the following are true:
 - [x] `.pre-commit-config.yaml` runs ruff (lint + format) and a pytest smoke test
 - [x] `pre-commit run --all-files` passes cleanly on a fresh repo
 - [x] `uv run pytest` runs successfully (one trivial test in `tests/test_smoke.py` is fine)
-- [ ] `src/twstock/config.py` exists with at least: `PROJECT_ROOT`, `DATA_DIR`, `UNIVERSE_SNAPSHOT_DATE`, `BACKTEST_CAPITAL_NTD = 1_000_000`, `MAX_POSITION_PCT = 0.10`
-- [ ] `src/twstock/universe.py` exposes `get_top50_universe() -> list[str]` returning a hard-coded snapshot of TWSE 0050 ETF constituents (50 ticker strings, e.g. "2330", "2317", ...)
-- [ ] Test exists in `tests/test_universe.py` asserting `len(get_top50_universe()) == 50` and all entries match `r"^\d{4}$"`
-- [ ] `src/twstock/data/sources/base.py` defines the abstract `DataSource` class with the three methods listed in `CLAUDE.md` section 5 (signatures only, `NotImplementedError` bodies)
-- [ ] `src/twstock/data/sources/finmind.py` and `src/twstock/data/sources/twse.py` exist as empty subclasses raising `NotImplementedError` (placeholders for Phase 1)
-- [ ] `journal/README.md` documents the journal conventions
-- [ ] `journal/weekly/2026-W19.md` exists with this week's plan
-- [ ] `journal/daily/2026-05-10.md` exists with today's entry
-- [ ] `journal/decisions/0001-stack-decisions.md` exists, summarizing the stack lock-ins from `CLAUDE.md` section 2
+- [x] `src/twstock/config.py` exists with at least: `PROJECT_ROOT`, `DATA_DIR`, `UNIVERSE_SNAPSHOT_DATE`, `BACKTEST_CAPITAL_NTD = 1_000_000`, `MAX_POSITION_PCT = 0.10`
+- [x] `src/twstock/universe.py` exposes `get_top50_universe() -> list[str]` returning a hard-coded snapshot of TWSE 0050 ETF constituents (50 ticker strings, e.g. "2330", "2317", ...)
+- [x] Test exists in `tests/test_universe.py` asserting `len(get_top50_universe()) == 50` and all entries match `r"^\d{4}$"`
+- [x] `src/twstock/data/sources/base.py` defines the abstract `DataSource` class with the three methods listed in `CLAUDE.md` section 5 (signatures only, `NotImplementedError` bodies)
+- [x] `src/twstock/data/sources/finmind.py` and `src/twstock/data/sources/twse.py` exist as empty subclasses raising `NotImplementedError` (placeholders for Phase 1)
+- [x] `journal/README.md` documents the journal conventions
+- [x] `journal/weekly/2026-W19.md` exists with this week's plan and a dated section for each working day
+- [x] `journal/decisions/0001-stack-decisions.md` exists, summarizing the stack lock-ins from `CLAUDE.md` section 2
 - [x] First commit pushed to GitHub
 
 ## Initial Dependencies
@@ -77,8 +76,7 @@ For `get_top50_universe()`, fetch the current 0050 constituent list from a publi
 
 ### Day 3 — Buffer and journal (~2–3 hours)
 - Set up `journal/` folder, write `journal/README.md`
-- Write `journal/weekly/2026-W19.md` planning the week
-- Write daily entries for each working day so far
+- Write `journal/weekly/2026-W19.md` with the week plan and dated sections for each working day so far
 - Write `journal/decisions/0001-stack-decisions.md`
 - Polish `README.md`
 - Register for FinMind API token (free tier) and add to local `.env`

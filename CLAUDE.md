@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the most recent daily journal entry in `journal/daily/`.
+Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
 **Last updated:** 2026-05-10
 **Current phase:** Phase 0 — Foundation setup
@@ -95,7 +95,6 @@ twstock-algo/
 ├── data/                        # gitignored
 ├── journal/
 │   ├── README.md
-│   ├── daily/
 │   ├── weekly/
 │   └── decisions/
 └── scripts/
@@ -147,11 +146,11 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 ## 8. Working Rhythm
 
 - **Sunday:** weekly sprint plan in `journal/weekly/<YYYY-WNN>.md`
-- **Each working day:** entry in `journal/daily/<YYYY-MM-DD>.md` — three sections: *Did*, *Learned*, *Next*
-- **Saturday:** retrospective appended to that week's weekly file
+- **Each working day:** append a dated section (`## <YYYY-MM-DD>`) to that week's file — three sub-sections: *Did*, *Learned*, *Next*
+- **Saturday:** append a retrospective section to that week's file
 - **Architectural decisions:** captured in `journal/decisions/<NNNN>-<slug>.md` (lightweight ADR format)
 
-When starting a session, read the most recent daily entry to pick up context. When ending a session, write tomorrow's daily entry stub with the *Next* section filled in.
+When starting a session, read the current week's file to pick up context. When ending a session, append tomorrow's dated stub with the *Next* section filled in.
 
 ## 9. Useful Commands
 
