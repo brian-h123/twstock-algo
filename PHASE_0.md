@@ -10,18 +10,18 @@
 
 Phase 0 is complete when **all** of the following are true:
 
-- [ ] Private GitHub repo `twstock-algo` exists, is cloned locally, and has an MIT `LICENSE` file
-- [ ] `uv` is initialized with Python 3.12 pinned in `.python-version`
-- [ ] `pyproject.toml` declares the project and lists initial dependencies (see below)
-- [ ] Folder skeleton matches `CLAUDE.md` section 4 exactly, with `__init__.py` in every Python package
-- [ ] `CLAUDE.md` is at repo root (already drafted; copy in)
-- [ ] `PHASE_0.md` is at repo root (this file)
-- [ ] `README.md` covers: project elevator pitch, current phase, setup instructions, a "this is a personal project, not investment advice" disclaimer
-- [ ] `.gitignore` covers Python, uv, IDE files, `data/`, `.env`, broker certificates, `__pycache__`, `.pytest_cache`, `.ruff_cache`
-- [ ] `.env.example` lists `FINMIND_TOKEN`, `FUBON_USER_ID`, `FUBON_PASSWORD`, `FUBON_CERT_PATH`, `FUBON_CERT_PASSWORD` with empty values
-- [ ] `.pre-commit-config.yaml` runs ruff (lint + format) and a pytest smoke test
-- [ ] `pre-commit run --all-files` passes cleanly on a fresh repo
-- [ ] `uv run pytest` runs successfully (one trivial test in `tests/test_smoke.py` is fine)
+- [x] Private GitHub repo `twstock-algo` exists, is cloned locally, and has an MIT `LICENSE` file
+- [x] `uv` is initialized with Python 3.12 pinned in `.python-version`
+- [x] `pyproject.toml` declares the project and lists initial dependencies (see below)
+- [x] Folder skeleton matches `CLAUDE.md` section 4 exactly, with `__init__.py` in every Python package
+- [x] `CLAUDE.md` is at repo root (already drafted; copy in)
+- [x] `PHASE_0.md` is at repo root (this file)
+- [x] `README.md` covers: project elevator pitch, current phase, setup instructions, a "this is a personal project, not investment advice" disclaimer
+- [x] `.gitignore` covers Python, uv, IDE files, `data/`, `.env`, broker certificates, `__pycache__`, `.pytest_cache`, `.ruff_cache`
+- [x] `.env.example` lists `FINMIND_TOKEN`, `FUBON_USER_ID`, `FUBON_PASSWORD`, `FUBON_CERT_PATH`, `FUBON_CERT_PASSWORD` with empty values
+- [x] `.pre-commit-config.yaml` runs ruff (lint + format) and a pytest smoke test
+- [x] `pre-commit run --all-files` passes cleanly on a fresh repo
+- [x] `uv run pytest` runs successfully (one trivial test in `tests/test_smoke.py` is fine)
 - [ ] `src/twstock/config.py` exists with at least: `PROJECT_ROOT`, `DATA_DIR`, `UNIVERSE_SNAPSHOT_DATE`, `BACKTEST_CAPITAL_NTD = 1_000_000`, `MAX_POSITION_PCT = 0.10`
 - [ ] `src/twstock/universe.py` exposes `get_top50_universe() -> list[str]` returning a hard-coded snapshot of TWSE 0050 ETF constituents (50 ticker strings, e.g. "2330", "2317", ...)
 - [ ] Test exists in `tests/test_universe.py` asserting `len(get_top50_universe()) == 50` and all entries match `r"^\d{4}$"`
@@ -31,7 +31,7 @@ Phase 0 is complete when **all** of the following are true:
 - [ ] `journal/weekly/2026-W19.md` exists with this week's plan
 - [ ] `journal/daily/2026-05-10.md` exists with today's entry
 - [ ] `journal/decisions/0001-stack-decisions.md` exists, summarizing the stack lock-ins from `CLAUDE.md` section 2
-- [ ] First commit pushed to GitHub
+- [x] First commit pushed to GitHub
 
 ## Initial Dependencies
 

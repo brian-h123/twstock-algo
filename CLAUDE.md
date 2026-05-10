@@ -128,7 +128,7 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 
 ## 6. Current State
 
-**Done:** (nothing yet)
+**Done:** Phase 0 Days 1–2 complete
 
 **Active:** Phase 0 — see `PHASE_0.md` for exit criteria and daily breakdown.
 
