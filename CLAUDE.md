@@ -2,7 +2,7 @@
 
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-13
 **Current phase:** Phase 1 — Data Pipeline (full spec: `PHASE_1.md`)
 
 ---
@@ -118,6 +118,7 @@ twstock-algo/
 │   └── dependencies.md          ← rationale for each new dep
 └── scripts/
     └── backfill.py              ← Phase 1
+    └── build_anchors.py         ← Phase 1 (regenerate adjustment cross-check fixture)
 ```
 
 ## 5. Data Source Contract
@@ -158,6 +159,16 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 
 **Active:** Phase 1 — Data Pipeline. Full spec in `PHASE_1.md`. ~2 weeks. Exit criteria are listed in §9 of that doc.
 
+**Mid-phase amendment (2026-05-13):** Decision D9 was superseded. The
+adjustment cross-validation method changed from a Yahoo Finance CSV
+fixture (Yahoo paywalled bulk downloads; Stooq does not cover TWSE) to
+a hand-curated anchor fixture at `tests/fixtures/anchor_dividends.json`,
+built from TSMC SEC 6-K filings (dividend amounts) plus TWSE's official
+STOCK_DAY endpoint (raw close prices). The test is now a local-invariant
+ratio assertion rather than a bulk-row comparison. Full rationale in
+`journal/decisions/2026-05-13-adjustment-cross-check-method.md`; spec
+changes in `PHASE_1.md` D9 and §4.6.
+
 **Day 1 task before any production code:** the FinMind corporate-actions spike (`PHASE_1.md` §8). The spike findings are recorded in `journal/decisions/` before any of the modules in `PHASE_1.md` §3 get implemented.
 
 **Build order:** follow `PHASE_1.md` §5 strictly. Schemas first, then storage, then adjustments, then sources, then quality/api, then the backfill script.
@@ -168,7 +179,7 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 - Do not write strategies before the backtester is operational. Phases run in order: 1 → 2 → 3 → 4 → ...
 - Do not bypass the `DataSource` interface to fetch market data ad-hoc.
 - Do not read or write Parquet outside of `storage.py`.
-- Do not regenerate `tests/fixtures/2330_yahoo_adjusted.csv` from any automated source. It is a static manual download, intentionally frozen.
+- Do not regenerate `tests/fixtures/anchor_dividends.json` from CI, pre-commit, or test setup. The committed JSON is the source of truth at test time. Regenerate only by running `scripts/build_anchors.py` deliberately, and only when the dividend reference table inside that script has been edited (e.g. adding a new ticker or correcting a source citation). Any regeneration must be reviewed in a commit diff alongside the dividend-table edit that justified it.
 - Do not auto-re-record VCR cassettes in CI or pre-commit. Re-record manually and review the diff.
 - Do not commit `.env`, anything in `data/`, anything in `logs/`, broker certificates, or anything in `secrets/`.
 - Do not delete or rewrite past journal entries; append corrections in a new entry.
@@ -207,6 +218,10 @@ uv run python scripts/backfill.py --tickers 2330       # one ticker, default ran
 uv run python scripts/backfill.py                      # all Top 50, default range
 uv run python scripts/backfill.py --start 2020-01-01   # custom range
 uv run python scripts/backfill.py --tickers 2330 --force   # re-fetch existing
+
+# Phase 1 — regenerate adjustment cross-check anchor fixture
+# (run only after editing the dividend reference table inside the script)
+uv run python scripts/build_anchors.py
 
 # Streamlit (Phase 2+)
 uv run streamlit run src/twstock/ui/app.py
