@@ -1,14 +1,24 @@
 from datetime import date
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 
 from twstock.config import DATA_DIR
-from twstock.data.schemas import OHLCV_SCHEMA, validate
+from twstock.data.schemas import CORPORATE_ACTIONS_SCHEMA, OHLCV_SCHEMA, validate
 
 
 def _ticker_path(ticker: str) -> Path:
     return DATA_DIR / "by_ticker" / f"{ticker}.parquet"
+
+
+def _ca_path(ticker: str) -> Path:
+    return DATA_DIR / "corporate_actions" / f"{ticker}.parquet"
+
+
+# ---------------------------------------------------------------------------
+# OHLCV
+# ---------------------------------------------------------------------------
 
 
 def write_ohlcv(ticker: str, df: pd.DataFrame) -> None:
@@ -73,3 +83,61 @@ def get_ticker_date_range(ticker: str) -> tuple[date, date] | None:
         return None
     df = pd.read_parquet(path)
     return df["date"].min().date(), df["date"].max().date()
+
+
+# ---------------------------------------------------------------------------
+# Corporate Actions
+# ---------------------------------------------------------------------------
+
+
+def write_corporate_actions(ticker: str, df: pd.DataFrame) -> None:
+    df = validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+    path = _ca_path(ticker)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if path.exists():
+        existing = pd.read_parquet(path)
+        merged = pd.concat([existing, df], ignore_index=True)
+    else:
+        merged = df.copy()
+
+    merged = merged.drop_duplicates(["ticker", "ex_date", "action_type"], keep="last")
+    merged = merged.sort_values(["ticker", "ex_date"]).reset_index(drop=True)
+
+    tmp = path.with_suffix(".parquet.tmp")
+    merged.to_parquet(tmp, index=False)
+    tmp.replace(path)
+
+
+def read_corporate_actions(ticker: str) -> pd.DataFrame:
+    path = _ca_path(ticker)
+
+    if not path.exists():
+        return pd.DataFrame(columns=["ex_date", "ticker", "action_type", "cash_amount", "ratio"])
+
+    df = pd.read_parquet(path)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Query
+# ---------------------------------------------------------------------------
+
+
+def query(sql: str) -> pd.DataFrame:
+    ohlcv_dir = DATA_DIR / "by_ticker"
+    ca_dir = DATA_DIR / "corporate_actions"
+
+    conn = duckdb.connect()
+    if ohlcv_dir.exists() and any(ohlcv_dir.glob("*.parquet")):
+        conn.execute(
+            f"CREATE VIEW ohlcv AS SELECT * FROM read_parquet("
+            f"'{ohlcv_dir.as_posix()}/*.parquet', union_by_name=true)"
+        )
+    if ca_dir.exists() and any(ca_dir.glob("*.parquet")):
+        conn.execute(
+            f"CREATE VIEW corporate_actions AS SELECT * FROM read_parquet("
+            f"'{ca_dir.as_posix()}/*.parquet', union_by_name=true)"
+        )
+    return conn.execute(sql).df()
