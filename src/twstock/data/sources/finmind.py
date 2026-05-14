@@ -49,7 +49,7 @@ class FinMindSource(DataSource):
         if response.status_code == 402:
             raise RateLimitError("request exceed rate limit")
         if response.status_code >= 500:
-            raise SourceUnavailableError("provider unreachable")
+            raise SourceUnavailableError("FINMIND unreachable")
         response.raise_for_status()
 
         body = response.json()
