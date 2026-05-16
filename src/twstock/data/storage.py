@@ -91,6 +91,8 @@ def get_ticker_date_range(ticker: str) -> tuple[date, date] | None:
 
 
 def write_corporate_actions(ticker: str, df: pd.DataFrame) -> None:
+    if df.empty:
+        return
     df = validate(df, CORPORATE_ACTIONS_SCHEMA)
 
     path = _ca_path(ticker)

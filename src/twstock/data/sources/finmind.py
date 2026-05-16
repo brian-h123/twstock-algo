@@ -86,6 +86,14 @@ class FinMindSource(DataSource):
             )
             .astype({"date": "datetime64[ns]", "volume": "int64", "value": "float64"})
         )
+        # Drop rows where open or close is 0 — trading halts and anomalous
+        # listing/restructuring days where FinMind has no valid price.
+        df = df[(df["open"] != 0) & (df["close"] != 0)]
+        # Clamp open to [low, high] so schema invariants hold for pre-TWSE rows
+        # where FinMind encodes the previous day's average as "open" (TPEx/emerging
+        # market period). Proper fix is FU-05: restrict fetch to TWSE listing date.
+        df["high"] = df[["high", "open"]].max(axis=1)
+        df["low"] = df[["low", "open"]].min(axis=1)
         return validate(df, OHLCV_SCHEMA)
 
     def _build_dividends(self, dividend_data: list[dict]) -> pd.DataFrame:
@@ -93,7 +101,7 @@ class FinMindSource(DataSource):
             ["date", "stock_id", "stock_and_cache_dividend", "stock_or_cache_dividend"]
         ]
 
-        TYPE_MAP = {"息": "cash_dividend", "權": "stock_dividend"}
+        TYPE_MAP = {"息": "cash_dividend", "權": "stock_dividend", "權息": "cash_dividend"}
         df_div["action_type"] = df_div["stock_or_cache_dividend"].map(TYPE_MAP)
         is_cash = df_div["action_type"] == "cash_dividend"
         df_div["cash_amount"] = df_div["stock_and_cache_dividend"].where(is_cash)
@@ -135,7 +143,13 @@ class FinMindSource(DataSource):
 
         if not dividend_data and not reduction_data:
             return pd.DataFrame(
-                columns=["ex_date", "ticker", "action_type", "cash_amount", "ratio"]
+                {
+                    "ex_date": pd.Series(dtype="datetime64[ns]"),
+                    "ticker": pd.Series(dtype="str"),
+                    "action_type": pd.Series(dtype="str"),
+                    "cash_amount": pd.Series(dtype="float64"),
+                    "ratio": pd.Series(dtype="float64"),
+                }
             )
 
         parts = []
