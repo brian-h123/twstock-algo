@@ -137,16 +137,14 @@ def test_get_universe_returns_50_tickers():
 def adj_2330() -> pd.DataFrame:
     if get_ticker_date_range("2330") is None:
         pytest.skip("2330 not backfilled; run scripts/backfill.py first")
-    earliest = min(a["ex_date"] for a in _ANCHORS)
-    return get_adjusted_history("2330", start=earliest)
+    return get_adjusted_history("2330", start="2016-01-01")
 
 
 @pytest.fixture(scope="module")
 def raw_2330() -> pd.DataFrame:
     if get_ticker_date_range("2330") is None:
         pytest.skip("2330 not backfilled; run scripts/backfill.py first")
-    earliest = min(a["ex_date"] for a in _ANCHORS)
-    return read_ohlcv("2330", start=date.fromisoformat(earliest)).set_index("date")
+    return read_ohlcv("2330", start=date(2016, 1, 1)).set_index("date")
 
 
 @pytest.mark.parametrize("anchor", _ANCHORS, ids=lambda a: a["ex_date"])

@@ -89,7 +89,7 @@ def test_action_before_data_range_is_noop():
 
 def test_cash_dividend_scales_prior_ohlc():
     # Jan 3 close=100, Jan 4 close=102 (last before ex_date), Jan 5 close=97
-    # factor = (102 - 5) / 102 = 97/102
+    # factor = T_close / (T_close + D) = 97 / (97 + 5) = 97/102
     raw = _ohlcv(
         ["2023-01-03", "2023-01-04", "2023-01-05"],
         [100.0, 102.0, 97.0],
@@ -172,14 +172,14 @@ def test_stock_dividend_scales_prior_prices():
 def test_multiple_actions_compound_correctly():
     # Jan 3 close=100, Jan 4 close=200, Jan 6 close=400
     # Action A (cash_div): ex=Jan 4, amount=10
-    #   last_close before Jan 4 = 100 → factor_A = (100-10)/100 = 0.9
-    #   Jan 3 scaled by 0.9; Jan 4 and Jan 6 untouched by A
+    #   T close (Jan 4) = 200 → factor_A = 200/(200+10) = 20/21 ≈ 0.9524
+    #   Jan 3 scaled by 20/21; Jan 4 and Jan 6 untouched by A
     # Action B (split):    ex=Jan 6, ratio=2
-    #   last_close before Jan 6 = 200 (Jan 4, unchanged by A) → factor_B = 0.5
+    #   factor_B = 1/2 = 0.5
     #   Jan 3 scaled again by 0.5; Jan 4 scaled by 0.5; Jan 6 untouched
-    # Final: Jan 3 = 100 * 0.9 * 0.5 = 45.0
-    #        Jan 4 = 200 * 0.5        = 100.0
-    #        Jan 6 = 400              (unchanged)
+    # Final: Jan 3 = 100 * (20/21) * 0.5 = 1000/21 ≈ 47.619
+    #        Jan 4 = 200 * 0.5            = 100.0
+    #        Jan 6 = 400                  (unchanged)
     raw = _ohlcv(
         ["2023-01-03", "2023-01-04", "2023-01-06"],
         [100.0, 200.0, 400.0],
@@ -193,7 +193,7 @@ def test_multiple_actions_compound_correctly():
     )
     result = adjust(raw, actions)
 
-    assert result.loc[0, "close"] == pytest.approx(45.0)
+    assert result.loc[0, "close"] == pytest.approx(1000.0 / 21.0)
     assert result.loc[1, "close"] == pytest.approx(100.0)
     assert result.loc[2, "close"] == pytest.approx(400.0)
 
@@ -216,7 +216,7 @@ def test_adjust_does_not_mutate_raw_ohlcv():
 
 
 def test_bad_cash_amount_raises_value_error():
-    # cash_amount=110 >= last_close=100 — factor would be negative
+    # cash_amount=110 >= T close=90 — factor would be > 1 (bad data)
     raw = _ohlcv(["2023-01-03", "2023-01-04"], [100.0, 90.0])
     actions = _cash_div("2023-01-04", cash_amount=110.0)
     with pytest.raises(ValueError, match="cash_amount"):

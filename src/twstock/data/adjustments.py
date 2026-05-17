@@ -1,16 +1,20 @@
 import pandas as pd
 
 
-def _compute_factor(action: pd.Series, last_close: float) -> float:
+def _compute_factor(action: pd.Series, ref_close: float) -> float:
     action_type = action["action_type"]
     if action_type == "cash_dividend":
         cash_amount = action["cash_amount"]
-        if cash_amount >= last_close:
+        if cash_amount >= ref_close:
             raise ValueError(
-                f"cash_amount ({cash_amount}) >= last_close ({last_close}) "
+                f"cash_amount ({cash_amount}) >= ref_close ({ref_close}) "
                 f"for {action['ticker']} on {action['ex_date']} — bad corporate actions data"
             )
-        return (last_close - cash_amount) / last_close
+        # Standard TWSE 還原權息 back-adjustment factor: Y / (Y + D)
+        # ref_close is the T close (close ON the ex_date, not T-1).
+        # Using T close ensures adj_close[T-1] / adj_close[T] = X / (Y + D)
+        # regardless of how much the stock moved beyond the dividend.
+        return ref_close / (ref_close + cash_amount)
     elif action_type == "stock_dividend":
         return 1.0 / (1.0 + action["ratio"])
     elif action_type == "split":
@@ -41,7 +45,7 @@ def adjust(raw_ohlcv: pd.DataFrame, corporate_actions: pd.DataFrame) -> pd.DataF
         open/high/low/close back-adjusted.
 
     Raises:
-        ValueError: If a cash_dividend action has cash_amount >= last_close,
+        ValueError: If a cash_dividend action has cash_amount >= ref_close,
             indicating bad corporate actions data.
     """
     if corporate_actions.empty:
@@ -53,8 +57,15 @@ def adjust(raw_ohlcv: pd.DataFrame, corporate_actions: pd.DataFrame) -> pd.DataF
         affected_rows = df[df["date"] < action["ex_date"]]
         if affected_rows.empty:
             continue
-        last_close = affected_rows.iloc[-1]["close"]
-        factor = _compute_factor(action, last_close)
+        # For cash_dividend the factor is Y/(Y+D) — requires T close (Y), not T-1 close.
+        # The bar at action["ex_date"] is unmodified at this loop iteration because we
+        # only multiply bars strictly before ex_date. Fall back to T-1 close only if
+        # ex_date has no bar in the OHLCV (data gap or future event).
+        ex_rows = df[df["date"] == action["ex_date"]]
+        ref_close = float(
+            ex_rows.iloc[0]["close"] if not ex_rows.empty else affected_rows.iloc[-1]["close"]
+        )
+        factor = _compute_factor(action, ref_close)
         df.loc[df["date"] < action["ex_date"], ["open", "high", "low", "close"]] *= factor
 
     return df
