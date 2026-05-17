@@ -20,6 +20,7 @@ from twstock.data.sources.base import (
 from twstock.data.sources.finmind import FinMindSource
 from twstock.data.sources.twse import TWSESource
 from twstock.data.storage import get_ticker_date_range, write_corporate_actions, write_ohlcv
+from twstock.universe import get_listing_dates
 
 BACKOFF_SCHEDULE = [5, 30, 300]
 
@@ -133,6 +134,7 @@ def main(args: argparse.Namespace) -> None:
     start = args.start or date.today() - timedelta(days=365 * 10)
     end = args.end or date.today()
     throttle_s = args.throttle_ms / 1000
+    listing_dates = get_listing_dates()
 
     try:
         source = FinMindSource() if args.source == "finmind" else TWSESource()
@@ -146,7 +148,8 @@ def main(args: argparse.Namespace) -> None:
 
     for ticker in tqdm(tickers):
         try:
-            fetch_range = resolve_fetch_window(ticker, start, end, args.force)
+            effective_start = max(start, listing_dates.get(ticker, start))
+            fetch_range = resolve_fetch_window(ticker, effective_start, end, args.force)
             if fetch_range is None:
                 record = {"ticker": ticker, "status": "skipped_current"}
             else:

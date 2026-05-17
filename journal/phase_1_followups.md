@@ -141,7 +141,7 @@ exit criteria are met.
 
 ---
 
-## FU-05 — Pre-TWSE listing prices stored for tickers that transferred from TPEx
+## FU-05 — Pre-TWSE listing prices stored for tickers that transferred from TPEx **[RESOLVED 2026-05-17]**
 
 **Discovered:** 2026-05-16 (Step 12)
 **Priority:** Resolve before Phase 2 begins.
@@ -181,3 +181,14 @@ downstream work inherits it.
 3. Re-backfill the affected tickers with `--force` to purge the pre-TWSE rows from
    the Parquet store.
 4. Remove the clamping workaround from `get_daily_ohlcv` once the store is clean.
+
+### Closing note (2026-05-17)
+
+TWSE Open API (`t187ap03_L`) used as the authoritative source — covers all 50 tickers
+in one call. 4 affected tickers identified (3711, 6669, 6919, 7769 — 3711 was a new
+discovery not in the original gap report). `get_listing_dates()` added to
+`src/twstock/universe.py` as a static dict; `scripts/fetch_listing_dates.py` added for
+future universe expansions. `backfill.py` updated to apply
+`effective_start = max(requested_start, listing_dates[ticker])` per ticker. Clamping
+workaround removed from `FinMindSource.get_daily_ohlcv`. Full Parquet store wiped and
+re-backfilled; `check_all()` reports 50/50 ok with correct start dates per ticker.

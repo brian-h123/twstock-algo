@@ -89,11 +89,6 @@ class FinMindSource(DataSource):
         # Drop rows where open or close is 0 — trading halts and anomalous
         # listing/restructuring days where FinMind has no valid price.
         df = df[(df["open"] != 0) & (df["close"] != 0)]
-        # Clamp open to [low, high] so schema invariants hold for pre-TWSE rows
-        # where FinMind encodes the previous day's average as "open" (TPEx/emerging
-        # market period). Proper fix is FU-05: restrict fetch to TWSE listing date.
-        df["high"] = df[["high", "open"]].max(axis=1)
-        df["low"] = df[["low", "open"]].min(axis=1)
         return validate(df, OHLCV_SCHEMA)
 
     def _build_dividends(self, dividend_data: list[dict]) -> pd.DataFrame:
