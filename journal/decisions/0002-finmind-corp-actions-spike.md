@@ -118,3 +118,63 @@ No expansion of `TwseSource` scope is required at this time.
 - The `stock_or_cache_dividend` → `action_type` mapping needs a small lookup in the
   FinMind adapter; confirm exact values when stock dividend or `權息` case is encountered
   (not observed in 2330 or 3711 data).
+
+---
+
+## Amendment — 2026-05-17 (Phase 1 step 13)
+
+**Subject:** Back-adjustment formula correction — clarifying what `reference_price / before_price` means and fixing an implementation deviation.
+
+### What the original decision said
+
+Implementation choice 2 recorded the back-adjustment factor as:
+
+> `reference_price / before_price` from `TaiwanStockDividendResult`
+
+This was underspecified. The field names from `TaiwanStockDividendResult` are:
+
+| Field | Meaning | Symbol |
+|---|---|---|
+| `reference_price` (減除股利參考價) | Theoretical ex-dividend open price = T close after dividend | Y |
+| `before_price` | Pre-ex-dividend reference price = Y + D | Y + D |
+
+So `reference_price / before_price` = `Y / (Y + D)`, where Y is the **close ON the ex-date (T)** and D is the dividend per share. This is the standard TWSE 還原權息 formula.
+
+### How the implementation deviated
+
+The initial `_compute_factor` in `adjustments.py` did not use the `TaiwanStockDividendResult` fields directly. Instead it derived the factor from the raw `cash_amount` column using the T-1 close (X):
+
+```python
+# Wrong — used T-1 close
+factor = (last_close - cash_amount) / last_close  # = (X - D) / X
+```
+
+The two formulas are equal only when `X - D = Y` — i.e., the stock drops by exactly the dividend amount. In practice this never holds: for 2018-06-25 TSMC, X = 227.5, Y = 218.0, D = 8.0, producing:
+- Wrong: `(227.5 - 8.0) / 227.5 = 0.96484`
+- Correct: `218.0 / (218.0 + 8.0) = 0.96460`
+
+Five of the six anchor events had a price drop close enough to the dividend that the error fell within the 0.01% test tolerance, masking the bug. The 2018-06-25 event — where the stock dropped 9.5 NT$ on an 8.0 NT$ dividend — pushed the error to ~0.024% and caused `test_adjustment_anchors` to fail once the fixture start-date bug was also fixed.
+
+### Corrected implementation
+
+`adjustments.py` now looks up the T close from the in-flight DataFrame (the bar at `ex_date` is unmodified at the point of processing, since only bars strictly before it are scaled):
+
+```python
+ex_rows = df[df["date"] == action["ex_date"]]
+ref_close = float(
+    ex_rows.iloc[0]["close"] if not ex_rows.empty else affected_rows.iloc[-1]["close"]
+)
+factor = ref_close / (ref_close + cash_amount)  # Y / (Y + D)
+```
+
+### Canonical formula (authoritative going forward)
+
+For a cash dividend of D per share with ex-date T:
+
+```
+factor = Y / (Y + D)
+```
+
+where Y = `close` of the bar dated T (close ON the ex-date). All bars with `date < T` are multiplied by this factor. The bar at T is never modified.
+
+The fallback (ex-date has no bar in OHLCV — data gap or future event) uses the T-1 close as ref_close, which is the best available approximation in that edge case.
