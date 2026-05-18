@@ -1,5 +1,6 @@
 import os
 import time
+import warnings
 from datetime import date
 
 import pandas as pd
@@ -92,39 +93,220 @@ class FinMindSource(DataSource):
         return validate(df, OHLCV_SCHEMA)
 
     def _build_dividends(self, dividend_data: list[dict]) -> pd.DataFrame:
-        df_div = pd.DataFrame(dividend_data)[
-            ["date", "stock_id", "stock_and_cache_dividend", "stock_or_cache_dividend"]
-        ]
+        _EMPTY = pd.DataFrame(
+            {
+                "ex_date": pd.Series(dtype="datetime64[ns]"),
+                "ticker": pd.Series(dtype="str"),
+                "action_type": pd.Series(dtype="str"),
+                "cash_amount": pd.Series(dtype="float64"),
+                "ratio": pd.Series(dtype="float64"),
+                "subscription_price": pd.Series(dtype="float64"),
+            }
+        )
+        rows: list[dict] = []
+        for raw in dividend_data:
+            stock_face_total = raw["StockEarningsDistribution"] + raw["StockStatutorySurplus"]
+            cash_total = raw["CashEarningsDistribution"] + raw["CashStatutorySurplus"]
+            has_rights = (
+                raw["TotalNumberOfCashCapitalIncrease"] > 0
+                and raw["ParticipateDistributionOfTotalShares"] > 0
+            )
+            has_cash = cash_total > 0
+            has_stock = stock_face_total > 0
+            ticker = raw["stock_id"]
+            cash_ex = raw["CashExDividendTradingDate"]
+            stock_ex = raw["StockExDividendTradingDate"]
 
-        TYPE_MAP = {"息": "cash_dividend", "權": "stock_dividend", "權息": "cash_dividend"}
-        df_div["action_type"] = df_div["stock_or_cache_dividend"].map(TYPE_MAP)
-        is_cash = df_div["action_type"] == "cash_dividend"
-        df_div["cash_amount"] = df_div["stock_and_cache_dividend"].where(is_cash)
-        df_div["ratio"] = (df_div["stock_and_cache_dividend"] / 10).where(~is_cash)
+            if raw["year"] == "不適用" and not has_rights:
+                continue
+            if not has_cash and not has_stock and not has_rights:
+                continue
 
-        df_div = df_div.rename(columns={"date": "ex_date", "stock_id": "ticker"})[
-            ["ex_date", "ticker", "action_type", "cash_amount", "ratio"]
-        ].astype({"ex_date": "datetime64[ns]", "cash_amount": "float64", "ratio": "float64"})
-        return df_div
+            if has_rights:
+                # Dilution ratio from share counts, not CashIncreaseSubscriptionRate.
+                # CashIncreaseSubscriptionRate appears to be the existing-shareholder
+                # subscription rate after 公司法 §267 employee carve-outs and underwriter
+                # allocation — not total dilution to existing shareholders.
+                rights_ratio = (
+                    raw["TotalNumberOfCashCapitalIncrease"]
+                    / raw["ParticipateDistributionOfTotalShares"]
+                )
+                rights_sub = raw["CashIncreaseSubscriptionpRrice"]
+            else:
+                rights_ratio = float("nan")
+                rights_sub = float("nan")
 
-    def _build_reductions(self, reduction_data: list[dict]) -> pd.DataFrame:
+            nan = float("nan")
+
+            if has_cash and has_stock and not has_rights:
+                if cash_ex != stock_ex:
+                    warnings.warn(
+                        f"cash_and_stock_dividend: cash ex-date {cash_ex} != stock ex-date "
+                        f"{stock_ex} for {ticker}. Skipping row.",
+                        stacklevel=2,
+                    )
+                    continue
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "cash_and_stock_dividend",
+                        "cash_amount": cash_total,
+                        "ratio": stock_face_total / 10,
+                        "subscription_price": nan,
+                    }
+                )
+            elif has_cash and not has_stock and not has_rights:
+                rows.append(
+                    {
+                        "ex_date": cash_ex,
+                        "ticker": ticker,
+                        "action_type": "cash_dividend",
+                        "cash_amount": cash_total,
+                        "ratio": nan,
+                        "subscription_price": nan,
+                    }
+                )
+            elif has_stock and not has_cash and not has_rights:
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "stock_dividend",
+                        "cash_amount": nan,
+                        "ratio": stock_face_total / 10,
+                        "subscription_price": nan,
+                    }
+                )
+            elif has_rights and has_cash and not has_stock:
+                rows.append(
+                    {
+                        "ex_date": cash_ex,
+                        "ticker": ticker,
+                        "action_type": "cash_dividend",
+                        "cash_amount": cash_total,
+                        "ratio": nan,
+                        "subscription_price": nan,
+                    }
+                )
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "rights_issue",
+                        "cash_amount": nan,
+                        "ratio": rights_ratio,
+                        "subscription_price": rights_sub,
+                    }
+                )
+            elif has_rights and has_stock and not has_cash:
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "stock_dividend",
+                        "cash_amount": nan,
+                        "ratio": stock_face_total / 10,
+                        "subscription_price": nan,
+                    }
+                )
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "rights_issue",
+                        "cash_amount": nan,
+                        "ratio": rights_ratio,
+                        "subscription_price": rights_sub,
+                    }
+                )
+            elif has_rights and has_cash and has_stock:
+                warnings.warn(
+                    f"Three-component row (cash+stock+rights) for {ticker} on {stock_ex}: "
+                    "emitting three separate rows.",
+                    stacklevel=2,
+                )
+                rows.append(
+                    {
+                        "ex_date": cash_ex,
+                        "ticker": ticker,
+                        "action_type": "cash_dividend",
+                        "cash_amount": cash_total,
+                        "ratio": nan,
+                        "subscription_price": nan,
+                    }
+                )
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "stock_dividend",
+                        "cash_amount": nan,
+                        "ratio": stock_face_total / 10,
+                        "subscription_price": nan,
+                    }
+                )
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "rights_issue",
+                        "cash_amount": nan,
+                        "ratio": rights_ratio,
+                        "subscription_price": rights_sub,
+                    }
+                )
+            else:
+                # has_rights and not has_cash and not has_stock
+                rows.append(
+                    {
+                        "ex_date": stock_ex,
+                        "ticker": ticker,
+                        "action_type": "rights_issue",
+                        "cash_amount": nan,
+                        "ratio": rights_ratio,
+                        "subscription_price": rights_sub,
+                    }
+                )
+
+        if not rows:
+            return _EMPTY
+
+        return pd.DataFrame(rows).astype(
+            {
+                "ex_date": "datetime64[ns]",
+                "cash_amount": "float64",
+                "ratio": "float64",
+                "subscription_price": "float64",
+            }
+        )[["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]]
+
+    def _build_capital_reductions(self, reduction_data: list[dict]) -> pd.DataFrame:
         df_red = pd.DataFrame(reduction_data)[
             ["date", "stock_id", "ClosingPriceonTheLastTradingDay", "PostReductionReferencePrice"]
         ]
-        df_red["action_type"] = "split"
+        df_red["action_type"] = "capital_reduction"
         df_red["ratio"] = (
             df_red["PostReductionReferencePrice"] / df_red["ClosingPriceonTheLastTradingDay"]
         )
         df_red["cash_amount"] = float("nan")
+        df_red["subscription_price"] = float("nan")
         df_red = df_red.rename(columns={"date": "ex_date", "stock_id": "ticker"})[
-            ["ex_date", "ticker", "action_type", "cash_amount", "ratio"]
-        ].astype({"ex_date": "datetime64[ns]", "cash_amount": "float64", "ratio": "float64"})
+            ["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]
+        ].astype(
+            {
+                "ex_date": "datetime64[ns]",
+                "cash_amount": "float64",
+                "ratio": "float64",
+                "subscription_price": "float64",
+            }
+        )
         return df_red
 
     def get_corporate_actions(self, ticker: str, start: date, end: date) -> pd.DataFrame:
         try:
             dividend_data = self._request(
-                "TaiwanStockDividendResult", {"data_id": ticker, "start_date": start}
+                "TaiwanStockDividend", {"data_id": ticker, "start_date": start}
             )
         except NoDataError:
             dividend_data = []
@@ -144,6 +326,7 @@ class FinMindSource(DataSource):
                     "action_type": pd.Series(dtype="str"),
                     "cash_amount": pd.Series(dtype="float64"),
                     "ratio": pd.Series(dtype="float64"),
+                    "subscription_price": pd.Series(dtype="float64"),
                 }
             )
 
@@ -151,7 +334,7 @@ class FinMindSource(DataSource):
         if dividend_data:
             parts.append(self._build_dividends(dividend_data))
         if reduction_data:
-            parts.append(self._build_reductions(reduction_data))
+            parts.append(self._build_capital_reductions(reduction_data))
 
         df = parts[0] if len(parts) == 1 else pd.concat(parts, ignore_index=True)
         return validate(df, CORPORATE_ACTIONS_SCHEMA)

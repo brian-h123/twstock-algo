@@ -51,8 +51,25 @@ def test_rate_limit_raises(source):
 def test_get_corporate_actions_returns_valid_schema(source):
     df = source.get_corporate_actions("2330", date(2019, 1, 1), date(2024, 12, 31))
     assert len(df) > 0
-    assert {"ex_date", "ticker", "action_type", "cash_amount", "ratio"}.issubset(df.columns)
+    assert {
+        "ex_date",
+        "ticker",
+        "action_type",
+        "cash_amount",
+        "ratio",
+        "subscription_price",
+    }.issubset(df.columns)
     assert (df["ticker"] == "2330").all()
     assert (
-        df["action_type"].isin(["cash_dividend", "stock_dividend", "split", "rights_issue"]).all()
+        df["action_type"]
+        .isin(
+            [
+                "cash_dividend",
+                "stock_dividend",
+                "cash_and_stock_dividend",
+                "rights_issue",
+                "capital_reduction",
+            ]
+        )
+        .all()
     )
