@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+    method: GET
+    uri: https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=20240101&stockNo=2330
+  response:
+    body:
+      string: 'Internal Server Error'
+    headers:
+      Content-Type:
+      - text/html
+    status:
+      code: 500
+      message: Internal Server Error
+version: 1

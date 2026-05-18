@@ -3,7 +3,7 @@
 > **Purpose.** Build a clean, queryable historical OHLCV store for the TWSE Top 50, with corporate actions handled correctly. This is the foundation every later phase rests on; over-invest in correctness here, under-invest in features.
 
 **Status:** Ready to start (spec finalized)
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-13
 **Estimated duration:** ~2 weeks
 **Predecessor:** Phase 0 (complete)
 
@@ -36,7 +36,7 @@ These are settled. Do not relitigate without an ADR.
 | D6 | **Test fixture strategy:** hybrid — hand-written fixtures for pure logic, VCR cassettes for source-layer realism, integration tests marked separately | See §6 for full detail. |
 | D7 | **Backfill script:** idempotent, resumable, partial-run capable, throttled, per-ticker error isolation, structured JSONL log | See §7 for full detail. |
 | D8 | **Trading calendar:** use `exchange_calendars` library with XTAI calendar for "missing day" DQ checks | Avoids hand-rolled holiday lists; well-maintained. |
-| D9 | **Adjustment cross-validation:** one-time manual CSV download from Yahoo Finance's historical-data page, committed as a static fixture | Avoids `yfinance` brittleness; cross-check is a validation gate, not an ongoing query. |
+| D9 | **Adjustment cross-validation:** hand-curated anchor events in `tests/fixtures/anchor_dividends.json`. Each event records the dividend amount (from TSMC SEC 6-K filings) and the T-1 / T raw closes (from TWSE STOCK_DAY official endpoint). Test asserts the user's adjusted-close ratio across each event matches the expected back-adjustment factor within 0.01%. | Yahoo paywalled CSV downloads; Stooq does not cover TWSE. Anchors derive from primary documents on both sides (SEC + TWSE), making the cross-check fully independent of FinMind and ToS-clean for a public repo. See `journal/decisions/2026-05-13-adjustment-cross-check-method.md`. |
 
 ---
 
@@ -188,7 +188,48 @@ Minimal `TwseSource(DataSource)`:
 - `get_corporate_actions` may raise `NotImplementedError` for now — flag in §10 as known gap
 - `list_universe` returns the hard-coded Top 50 from `universe.py` (TWSE doesn't have a clean "Top 50" endpoint)
 
-### 4.6 `data/adjustments.py`
+### 4.6 `tests/fixtures/anchor_dividends.json`
+
+Hand-curated cross-check anchors. Each anchor exercises the adjustment
+function's behaviour at one known corporate-action event. Schema per
+anchor entry:
+
+| Field | Type | Source |
+|---|---|---|
+| `ticker` | string (4-digit) | hard-coded |
+| `ex_date` | YYYY-MM-DD | primary announcement |
+| `action_type` | `cash_dividend` / `stock_dividend` / `split` / `rights_issue` | classification |
+| `dividend_amount` | float, NT$ per share | TSMC SEC 6-K + TSMC IR (cash) |
+| `raw_close_t_minus_1` | float | TWSE `exchangeReport/STOCK_DAY` |
+| `raw_close_t` | float | TWSE `exchangeReport/STOCK_DAY` |
+| `expected_adj_close_ratio` | float | precomputed: `raw_close_t_minus_1 / (raw_close_t + dividend_amount)` for cash; this is exactly the ratio the test asserts the user's adjusted-close series exhibits across the event (not the textbook back-adjustment factor `Y / (Y + D)`, which is a different number). Analogous formula per event type. |
+| `source_dividend` | string | citation for the dividend figure |
+| `source_prices` | string | always `"TWSE STOCK_DAY official endpoint"` for fixture v1 |
+| `notes` | string | optional |
+
+The fixture is built by `scripts/build_anchors.py` from a hard-coded
+table of verified dividend events plus live TWSE queries. Re-run the
+script only when the dividend reference table is edited; the JSON is
+committed and is the source of truth at test time.
+
+**Test contract** (`tests/data/test_api.py::test_adjustment_anchors`):
+for each anchor, the user's adjusted-close series from
+`get_adjusted_history(ticker, ..., end=today)` must satisfy:
+
+```python
+adj_close[ex_date - 1 trading day] / adj_close[ex_date]  \
+    ≈  raw_close_t_minus_1 / (raw_close_t + dividend_amount)
+```
+
+with relative tolerance 0.01%. The data-fidelity sub-assertion
+(user's raw_close from FinMind matches TWSE's raw_close within 0.1%)
+runs as a separate test so failures can be distinguished.
+
+Initial coverage: 6 TSMC cash-dividend events spanning 2018–2024.
+Stock-dividend / split / rights-issue coverage is a Phase 1 followup
+(see `journal/phase_1_followups.md`).
+
+### 4.7 `data/adjustments.py`
 
 One pure function:
 
@@ -204,20 +245,11 @@ def adjust(
     Pure: same inputs → same outputs. No I/O."""
 ```
 
-Algorithm: standard back-adjustment using cumulative adjustment factor. For each action in chronological order, compute factor and multiply all *prior* bars' prices by it. Reference: Yahoo Finance "adjusted close" methodology.
+Algorithm: standard back-adjustment using cumulative adjustment factor. For each action in chronological order, compute factor and multiply all *prior* bars' prices by it. Reference: standard 還原權息 (back-adjustment) convention used by TWSE brokers.
 
-**Cross-validation requirement:** include a test that compares the adjusted close for ticker 2330 across the full 10-year backfill window against Yahoo Finance's adjusted close. Tolerance: 0.1%.
+**Cross-validation requirement:** `test_adjustment_anchors` in `tests/data/test_api.py` asserts the adjusted-close ratio across each event in `tests/fixtures/anchor_dividends.json` matches the expected back-adjustment factor within 0.01%. See §4.6 for the fixture schema and `journal/decisions/2026-05-13-adjustment-cross-check-method.md` for rationale. The fixture is regenerated only by running `scripts/build_anchors.py` deliberately.
 
-**How to produce the reference fixture** (one-time manual task):
-1. Go to `https://finance.yahoo.com/quote/2330.TW/history`
-2. Set date range to match the backfill window (e.g. 2016-01-01 to today)
-3. Click "Download" — this gives a CSV with `Date, Open, High, Low, Close, Adj Close, Volume`
-4. Save as `tests/fixtures/2330_yahoo_adjusted.csv`. Add a header comment line documenting source URL, date of download, and Yahoo's stated adjustment methodology.
-5. Commit. Do not regenerate unless backfill window changes — the fixture is intentionally static.
-
-**Do not depend on `yfinance` or any scraping library.** The fixture is checked in for reproducibility; a flaky network or upstream API break must not be able to fail this test.
-
-### 4.7 `data/quality.py`
+### 4.8 `data/quality.py`
 
 Pure functions taking DataFrames in, returning a report:
 
@@ -244,7 +276,7 @@ def check_all() -> list[DQReport]: ...
 
 Pure missing-day count or zero-volume day count alone is **not** critical — these are reported but don't fail the check.
 
-### 4.8 `data/api.py`
+### 4.9 `data/api.py`
 
 The public entry point. This is what every other phase imports from.
 
@@ -264,7 +296,7 @@ def get_universe() -> list[str]:
 
 In-process caching: simple `functools.lru_cache` keyed on `(ticker, start, end)`. Bust manually if needed (Phase 8 concern).
 
-### 4.9 `scripts/backfill.py`
+### 4.10 `scripts/backfill.py`
 
 See §7 for the full spec — too important to bury inline here.
 
@@ -277,7 +309,7 @@ Build in this order. Each step has its own commit and tests.
 1. **Day 1 — FinMind spike (no code committed yet).** See §8.
 2. `data/schemas.py` + `tests/data/test_schemas.py`. Pure pandera, fastest feedback loop.
 3. `data/storage.py` (write/read OHLCV only, no DuckDB yet) + tests with hand-made DataFrames. No source yet.
-4. `data/adjustments.py` + tests against hand-made action scenarios + the Yahoo cross-check fixture.
+4. `data/adjustments.py` + tests against hand-made action scenarios + anchor cross-check fixture (§4.6).
 5. `data/sources/base.py` refinement (exceptions, signatures locked).
 6. `data/sources/finmind.py` + cassette tests + 1 integration test (marked).
 7. `data/sources/twse.py` (minimal) + tests.
@@ -306,7 +338,7 @@ Three categories, each with its own discipline.
 - `tests/fixtures/2330_2023_clean.csv` — 20 rows of clean 2330 data
 - `tests/fixtures/2330_2023_with_split.csv` — same window with an injected 2:1 split
 - `tests/fixtures/2330_actions_2020_2024.csv` — known dividends and splits
-- `tests/fixtures/2330_yahoo_adjusted.csv` — Yahoo adjusted close for cross-validation. **Source:** manual download from Yahoo Finance historical data page; header line documents URL and download date. Static — do not regenerate.
+- `tests/fixtures/anchor_dividends.json` — hand-curated anchor events for adjustment cross-validation. **Source:** TSMC SEC 6-K filings (dividend amounts) + TWSE STOCK_DAY endpoint (raw closes). Regenerated only via `scripts/build_anchors.py`; see §4.6.
 - `tests/fixtures/malformed_ohlcv.csv` — schema violations, for negative tests
 
 **Rule:** fixtures stay small (< 100 rows). If you need bigger, you're testing the wrong thing.
@@ -443,7 +475,8 @@ This spike is in scope for Phase 1 itself — not Phase 0 cleanup.
 Phase 1 is done when **all** of the following hold:
 
 - [ ] `get_adjusted_history("2330", "2016-01-01", "2026-05-10")` returns a clean adjusted DataFrame in < 1 second (warm cache; cold can be slower)
-- [ ] Adjusted close for 2330 matches the Yahoo Finance reference fixture to within 0.1% across the full 10-year window (cross-validation test passes)
+- [ ] Adjustment cross-check: `test_adjustment_anchors` passes for all anchor events in `tests/fixtures/anchor_dividends.json` (tolerance 0.01% on the back-adjustment ratio; data-fidelity sub-assertion 0.1% on raw close match against TWSE)
+- [ ] Phase 1 followups file lists at least one stock-dividend / split coverage gap to address before Phase 2
 - [ ] Backfill script runs end-to-end on all 50 tickers without manual intervention; final exit code is 0
 - [ ] `quality.check_all()` reports `ok=True` for at least 48 of 50 tickers; any exceptions are documented in the journal with explanation
 - [ ] Unit test suite runs in < 5 seconds and passes
@@ -462,7 +495,7 @@ Phase 1 is done when **all** of the following hold:
 
 **Listing-date handling.** Some Top 50 tickers may not have 10 years of history (e.g. 3711 ASE Tech listed in 2018). DQ checks must compute "missing trading days" relative to `min(date)` of the ticker, not the universe-wide start.
 
-**Adjustment math is the #1 retail backtest bug.** The Yahoo cross-validation test is non-negotiable. Tolerance is 0.1% because Yahoo and TWSE round differently on tiny dividends, not because the math is allowed to be approximate.
+**Adjustment math is the #1 retail backtest bug.** The anchor cross-validation test is non-negotiable. The 0.01% tolerance is for float-precision drift only; the math itself must be exact. The data-fidelity sub-assertion's looser 0.1% tolerance accounts for the rare case where TWSE's published close and FinMind's stored close differ at the cent level due to ingest-time rounding. Treat any anchor failure as a release-blocker bug.
 
 **FinMind free tier rate limits.** Documented in spike. Throttle aggressively; the backfill is a one-time cost.
 
@@ -515,6 +548,6 @@ Before pasting this into Claude Code, confirm:
 
 - [ ] FinMind account registered, token in local `.env`, token NOT committed
 - [ ] Spike (§8) completed, findings recorded
-- [ ] Yahoo Finance reference CSV downloaded and committed to `tests/fixtures/2330_yahoo_adjusted.csv` (per §4.6)
+- [ ] `scripts/build_anchors.py` runs cleanly and produces `tests/fixtures/anchor_dividends.json` with 6 populated TSMC anchors (per §4.6)
 - [ ] You have ~2 uninterrupted weeks of bandwidth (or willingness to slip)
 - [ ] Phase 0 conventions are clear in `CLAUDE.md` and will be respected

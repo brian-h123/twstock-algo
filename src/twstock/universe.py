@@ -1,3 +1,6 @@
+from datetime import date
+
+
 def get_top50_universe() -> list[str]:
     """Return the TWSE 0050 ETF constituent tickers as a hard-coded snapshot.
 
@@ -61,3 +64,67 @@ def get_top50_universe() -> list[str]:
         "6919",  # 康霈
         "6505",  # 台塑化
     ]
+
+
+def get_listing_dates() -> dict[str, date]:
+    """Return the TWSE listing date for each ticker in the Top-50 universe.
+
+    Returns:
+        Dict mapping ticker string to its TWSE listing date (掛牌日期).
+
+    Source:
+        TWSE Open API t187ap03_L, fetched 2026-05-17.
+        Re-run scripts/fetch_listing_dates.py when the universe expands.
+    """
+    return {
+        "2330": date(1994, 9, 5),
+        "2454": date(2001, 7, 23),
+        "2308": date(1988, 12, 19),
+        "2317": date(1991, 6, 18),
+        "3711": date(2018, 4, 30),
+        "2383": date(1998, 11, 27),
+        "2345": date(1995, 11, 15),
+        "3037": date(2002, 8, 26),
+        "2303": date(1985, 7, 16),
+        "2891": date(2002, 5, 17),
+        "2382": date(1999, 1, 8),
+        "2360": date(1996, 12, 21),
+        "2881": date(2001, 12, 19),
+        "3017": date(2002, 9, 27),
+        "2882": date(2001, 12, 31),
+        "2885": date(2002, 2, 4),
+        "2327": date(1993, 10, 22),
+        "2887": date(2002, 2, 18),
+        "6669": date(2019, 3, 27),
+        "2412": date(2000, 10, 27),
+        "2884": date(2002, 1, 28),
+        "2886": date(2002, 2, 4),
+        "2368": date(1998, 3, 9),
+        "2357": date(1996, 11, 14),
+        "3231": date(2003, 8, 19),
+        "1303": date(1967, 11, 15),
+        "2301": date(1995, 11, 17),
+        "2890": date(2002, 5, 9),
+        "3661": date(2014, 10, 28),
+        "1216": date(1987, 12, 28),
+        "2883": date(2001, 12, 28),
+        "2449": date(2001, 5, 9),
+        "2344": date(1995, 10, 18),
+        "7769": date(2025, 11, 27),
+        "2892": date(2003, 1, 2),
+        "2880": date(2001, 12, 19),
+        "2059": date(2008, 6, 25),
+        "2408": date(2000, 8, 17),
+        "3653": date(2009, 11, 18),
+        "3008": date(2002, 3, 11),
+        "5880": date(2011, 12, 1),
+        "2603": date(1987, 9, 21),
+        "2395": date(1999, 12, 13),
+        "2002": date(1974, 12, 26),
+        "1301": date(1964, 7, 27),
+        "4904": date(2005, 8, 24),
+        "3045": date(2002, 8, 26),
+        "2207": date(1997, 2, 25),
+        "6919": date(2024, 10, 2),
+        "6505": date(2003, 12, 26),
+    }

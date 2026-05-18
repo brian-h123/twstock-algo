@@ -7,22 +7,27 @@ license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     "duckdb",
+    "exchange-calendars>=4.13.2",
     "pandas",
     "pandera",
     "pyarrow",
     "python-dotenv",
     "requests",
+    "tqdm>=4.67.3",
 ]
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.2.0",
     "pre-commit",
     "pytest",
+    "pytest-recording>=0.13.4",
     "ruff",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--record-mode=none"
 
 [tool.ruff]
 line-length = 100

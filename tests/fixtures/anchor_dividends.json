@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-05-13T02:39:45.756517+00:00",
+  "description": "Hand-curated cross-check anchors for the adjustment function. Each event's raw close prices are fetched from TWSE's official STOCK_DAY endpoint; dividend amounts are from TSMC SEC 6-K filings and TSMC IR. Sources deliberately independent of FinMind. The `expected_adj_close_ratio` field is the value the test asserts directly (X / (Y + D)), not the textbook back-adjustment factor (Y / (Y + D)). See journal/decisions/2026-05-13-adjustment-cross-check-method.md.",
+  "anchors": [
+    {
+      "ticker": "2330",
+      "ex_date": "2018-06-25",
+      "action_type": "cash_dividend",
+      "dividend_amount": 8.0,
+      "raw_close_t_minus_1": 227.5,
+      "raw_close_t": 218.0,
+      "expected_adj_close_ratio": 1.0066371681415929,
+      "source_dividend": "TSMC press release 2018-06-05 + SEC 6-K. Annual dividend for FY2017 profits.",
+      "source_prices": "TWSE STOCK_DAY official endpoint",
+      "notes": ""
+    },
+    {
+      "ticker": "2330",
+      "ex_date": "2019-06-24",
+      "action_type": "cash_dividend",
+      "dividend_amount": 8.0,
+      "raw_close_t_minus_1": 248.5,
+      "raw_close_t": 241.0,
+      "expected_adj_close_ratio": 0.9979919678714859,
+      "source_dividend": "TSMC press release 2019-06-05 + SEC 6-K. Final annual-style dividend (FY2018 profits) before transition to quarterly cadence.",
+      "source_prices": "TWSE STOCK_DAY official endpoint",
+      "notes": ""
+    },
+    {
+      "ticker": "2330",
+      "ex_date": "2020-06-18",
+      "action_type": "cash_dividend",
+      "dividend_amount": 2.5,
+      "raw_close_t_minus_1": 315.0,
+      "raw_close_t": 314.5,
+      "expected_adj_close_ratio": 0.9936908517350158,
+      "source_dividend": "TSMC SEC 6-K filed 2020-02-11. Q4 2019 quarterly dividend.",
+      "source_prices": "TWSE STOCK_DAY official endpoint",
+      "notes": ""
+    },
+    {
+      "ticker": "2330",
+      "ex_date": "2022-06-16",
+      "action_type": "cash_dividend",
+      "dividend_amount": 2.75,
+      "raw_close_t_minus_1": 509.0,
+      "raw_close_t": 508.0,
+      "expected_adj_close_ratio": 0.9965736661771905,
+      "source_dividend": "stockanalysis.com TPE:2330 dividend history (corroborated via TSMC IR). Q4 2021 quarterly dividend.",
+      "source_prices": "TWSE STOCK_DAY official endpoint",
+      "notes": ""
+    },
+    {
+      "ticker": "2330",
+      "ex_date": "2023-12-14",
+      "action_type": "cash_dividend",
+      "dividend_amount": 3.0,
+      "raw_close_t_minus_1": 577.0,
+      "raw_close_t": 582.0,
+      "expected_adj_close_ratio": 0.9863247863247864,
+      "source_dividend": "stockanalysis.com TPE:2330 dividend history. Q2 2023 quarterly dividend.",
+      "source_prices": "TWSE STOCK_DAY official endpoint",
+      "notes": ""
+    },
+    {
+      "ticker": "2330",
+      "ex_date": "2024-06-13",
+      "action_type": "cash_dividend",
+      "dividend_amount": 3.49979,
+      "raw_close_t_minus_1": 909.0,
+      "raw_close_t": 919.0,
+      "expected_adj_close_ratio": 0.9853660779695137,
+      "source_dividend": "stockanalysis.com TPE:2330 dividend history (full precision from TWSE filing; small per-share adjustment relative to the headline NT$3.50 reflects employee stock option dilution). Q4 2023 quarterly dividend.",
+      "source_prices": "TWSE STOCK_DAY official endpoint",
+      "notes": ""
+    }
+  ]
+}

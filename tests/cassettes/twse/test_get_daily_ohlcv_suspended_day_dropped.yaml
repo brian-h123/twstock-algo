@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+    method: GET
+    uri: https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=20240101&stockNo=2330
+  response:
+    body:
+      string: '{"stat":"OK","date":"11301","fields":["日期","成交股數","成交金額","開盤價","最高價","最低價","收盤價","漲跌價差","成交筆數"],"data":[["113/01/02","25,633,836","20,837,637,952","811.00","830.00","808.00","830.00","+22.00","32,710"],["113/01/08","--","--","--","--","--","--","0","0"],["113/01/15","21,904,280","17,695,491,424","809.00","812.00","803.00","808.00","-22.00","25,432"]],"total":3}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1

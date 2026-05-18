@@ -2,8 +2,8 @@
 
 > **Purpose of this document.** A single reference covering project goals, locked decisions, and the full phase plan. Designed to be pasted into new Claude chats so any conversation can pick up project context without re-explaining everything. Updated at the end of each phase.
 
-**Last updated:** 2026-05-11
-**Current phase:** Phase 1 — Data Pipeline (detailed spec: `PHASE_1.md`)
+**Last updated:** 2026-05-17
+**Current phase:** Phase 2 — Inspection Dashboard (Phase 1 complete; see `journal/phase_1_retro.md`)
 **Repo:** `twstock-algo` (private GitHub)
 
 ---
@@ -353,7 +353,7 @@ based on what I learned, (2) produce a brief retrospective, and
 | Phase | Status | Started | Ended | Notes |
 |---|---|---|---|---|
 | 0 — Foundation | Done | 2026-05-10 | 2026-05-11 | Repo, tooling, conventions, universe, abstract `DataSource`, journal scaffold all in place |
-| 1 — Data Pipeline | Active | 2026-05-11 | — | Spec finalized in `PHASE_1.md` |
+| 1 — Data Pipeline | Done | 2026-05-11 | 2026-05-17 | 50/50 tickers backfilled; 111 tests passing; all exit criteria met. Retro: `journal/phase_1_retro.md`. Open: FU-05 (pre-TWSE prices for 6669/7769/6919) must be resolved before Phase 2 starts. |
 | 2 — Dashboard | Pending | — | — | — |
 | 3 — Backtester | Pending | — | — | — |
 | 4 — Technical strategies | Pending | — | — | — |
