@@ -2,19 +2,25 @@
 
 This script fetches raw close prices directly from TWSE's STOCK_DAY endpoint
 (independent of FinMind) and combines them with dividend amounts sourced from
-TSMC SEC 6-K filings and TSMC IR. The output is a JSON fixture used by the
-adjustment cross-validation test in Phase 1.
+TSMC SEC 6-K filings, TSMC IR, and Taiwan Cement (TSC) AGM resolutions / TWSE
+MOPS announcements. The output is a JSON fixture used by the adjustment
+cross-validation test in Phase 1.
 
-The test design is a *local invariant* test. For each anchor event with
-ex-date T, dividend D, raw_close[T-1]=X, raw_close[T]=Y, the back-adjustment
-factor any correct adjustment function must apply at that event is exactly
-Y / (Y + D). The corresponding ratio of adjusted closes across the event is
+Three event types are supported, each with its own local-invariant formula
+applied at ex-date T (raw_close[T-1] = X, raw_close[T] = Y):
 
-    adj_close[T-1] / adj_close[T]  =  X / (Y + D)
+  cash_dividend (amount D):
+      back-adj factor = Y / (Y + D)
+      adj_close[T-1] / adj_close[T] = X / (Y + D)
 
-This ratio is the value stored in `expected_adj_close_ratio` and is exactly
-what the cross-validation test asserts the user's adjusted-close series
-exhibits across each anchor event, within tolerance.
+  stock_dividend (ratio R, decimal per-share fraction):
+      back-adj factor = 1 / (1 + R)
+      adj_close[T-1] / adj_close[T] = X / (Y * (1 + R))
+
+  cash_and_stock_dividend (D and R both present, same ex-date — the Taiwan
+  convention for large-cap distributions, 除權息合一):
+      back-adj factor = Y / (Y + D) * 1 / (1 + R)
+      adj_close[T-1] / adj_close[T] = X / ((Y + D) * (1 + R))
 
 Run from project root:
     uv run python scripts/build_anchors.py
@@ -39,20 +45,32 @@ THROTTLE_SECONDS = 3.0  # TWSE is sensitive to rapid requests; be polite.
 
 # ----- Dividend reference data --------------------------------------------------
 #
-# Each entry is a verified TSMC dividend event. The `dividend_amount` value is
-# the NT$ per common share figure from the primary source listed in `source`.
-# These are NOT sourced from FinMind — that is intentional. The cross-check
-# loses meaning if both sides come from the same upstream pipeline.
+# Each entry is a verified corporate-action event. Dividend amounts and stock-
+# dividend ratios come from primary sources (SEC 6-K, company IR / AGM
+# resolutions, TWSE MOPS announcements). These are NOT sourced from FinMind —
+# that is intentional. The cross-check loses meaning if both sides come from
+# the same upstream pipeline.
+#
+# Coverage:
+#   - TSMC (2330) cash dividends, post-2018
+#   - Taiwan Cement (1101) combined cash + stock dividends, 2020 and 2022
 #
 # Sources used:
 #   - SEC EDGAR Form 6-K filings (TSMC files quarterly with the US SEC because
 #     of its NYSE ADR listing; these contain the exact NT$ per-share figures)
 #   - TSMC investor relations (pr.tsmc.com and investor.tsmc.com)
-#   - stockanalysis.com TPE:2330 dividend history (which is itself sourced
-#     from TWSE/TSMC; used here as a cross-check of the SEC filings)
+#   - stockanalysis.com TPE:2330 dividend history (sourced from TWSE/TSMC;
+#     used as a cross-check of the SEC filings)
+#   - Taiwan Cement AGM resolutions + TWSE MOPS ex-rights/ex-dividend
+#     announcements for 1101 (2020-08-12 and 2022-07-21)
 #
-# Coverage: post-2018 only. Pre-2018 events can be added later; SEC EDGAR
-# has filings going back to ~2010 in the same format.
+# Pure stock-dividend events (no cash component on the same ex-date) are
+# essentially absent from TWSE Top 50 post-2015 — Taiwan companies almost
+# universally combine cash and stock distributions onto a single ex-date
+# (除權息合一). The `stock_dividend` action_type remains supported in the
+# build_anchor logic for future use (e.g. small-cap pure-stock events,
+# splits handled as ratio-only adjustments) but no real anchor of that type
+# is currently included.
 
 ANCHOR_EVENTS: list[dict] = [
     {
@@ -109,6 +127,40 @@ ANCHOR_EVENTS: list[dict] = [
             "Q4 2023 quarterly dividend."
         ),
     },
+    {
+        "ticker": "1101",
+        "ex_date": "2020-08-12",
+        "action_type": "cash_and_stock_dividend",
+        "dividend_amount": 2.5,
+        "ratio": 0.05,
+        "source": (
+            "Taiwan Cement Corp. (TSC) 2020 AGM resolution distributing FY2019 "
+            "earnings: cash dividend NT$2.50 per share + stock dividend NT$0.50 "
+            "per share at NT$10 face value (i.e. 50 new shares per 1,000 "
+            "existing shares, ratio = 0.05). Cross-validated against the TWSE "
+            "MOPS ex-rights/ex-dividend announcement at "
+            "https://mops.twse.com.tw/mops/web/t05st09_2 (1101, ex-date "
+            "2020/08/12) and TSC corporate IR."
+        ),
+    },
+    {
+        "ticker": "1101",
+        "ex_date": "2022-07-21",
+        "action_type": "cash_and_stock_dividend",
+        "dividend_amount": 1.0,
+        "ratio": 0.1,
+        "source": (
+            "Taiwan Cement Corp. (TSC) 2022 AGM resolution distributing FY2021 "
+            "earnings: cash dividend NT$1.00 per share + stock dividend NT$1.00 "
+            "per share at NT$10 face value (i.e. 100 new shares per 1,000 "
+            "existing shares, ratio = 0.10). Cross-validated against the TWSE "
+            "MOPS ex-rights/ex-dividend announcement at "
+            "https://mops.twse.com.tw/mops/web/t05st09_2 (1101, ex-date "
+            "2022/07/21) and TSC corporate IR. Picked as the second 1101 "
+            "anchor for ratio diversity (0.05 vs 0.10) and to give the "
+            "cross-check two independent combined-event data points."
+        ),
+    },
 ]
 
 
@@ -119,27 +171,36 @@ ANCHOR_EVENTS: list[dict] = [
 class Anchor:
     """Final output schema for one anchor event.
 
+    Field semantics by `action_type`:
+        cash_dividend            → dividend_amount set, ratio = None
+        stock_dividend           → dividend_amount = None, ratio set
+        cash_and_stock_dividend  → both dividend_amount and ratio set
+
     `expected_adj_close_ratio` is the precomputed value the cross-validation
-    test asserts the user's adjusted-close series matches across this event:
+    test asserts the user's adjusted-close series matches across this event.
+    For each type, given raw_close[T-1] = X and raw_close[T] = Y:
 
-        adj_close[T-1] / adj_close[T]  ≈  raw_close_t_minus_1 / (raw_close_t + dividend_amount)
+        cash_dividend            → X / (Y + dividend_amount)
+        stock_dividend           → X / (Y * (1 + ratio))
+        cash_and_stock_dividend  → X / ((Y + dividend_amount) * (1 + ratio))
 
-    For cash dividends this equals X / (Y + D). For a perfectly "clean"
-    dividend drop (raw_close_t_minus_1 == raw_close_t + dividend_amount) the
-    ratio equals 1.0; intraday market moves on the ex-date push it off 1.0 by
-    the daily-return magnitude. The textbook back-adjustment *factor*
-    Y / (Y + D) is a different number; it is intentionally NOT what this
-    field stores. The test uses the ratio directly.
+    These ratios all sit near 1.0 for a "clean" market reaction to the event
+    (i.e. when raw_close[T] equals the theoretical ex-rights/ex-div reference
+    price); intraday moves on the ex-date push the ratio off 1.0 by the
+    daily-return magnitude. The textbook back-adjustment *factors* (e.g.
+    Y/(Y+D) for cash, 1/(1+R) for stock) are different numbers than what is
+    stored here; the test uses these ratios directly.
     """
 
     ticker: str
     ex_date: str  # YYYY-MM-DD
     action_type: str
-    dividend_amount: float
     raw_close_t_minus_1: float
     raw_close_t: float
     expected_adj_close_ratio: float
     source_dividend: str
+    dividend_amount: float | None = None
+    ratio: float | None = None
     source_prices: str = "TWSE STOCK_DAY official endpoint"
     notes: str = ""
 
@@ -205,23 +266,57 @@ def find_anchor_closes(rows: list[dict], ex_date: date) -> tuple[float, float]:
     return t_minus_1_row["close"], t_row["close"]
 
 
+def _compute_expected_ratio(
+    action_type: str,
+    t_minus_1_close: float,
+    t_close: float,
+    dividend_amount: float | None,
+    ratio: float | None,
+) -> float:
+    """Compute expected adj-close ratio per the event type's local invariant.
+
+    See `Anchor` docstring for the per-type formulas.
+    """
+    if action_type == "cash_dividend":
+        if dividend_amount is None:
+            raise ValueError("cash_dividend event missing dividend_amount")
+        return t_minus_1_close / (t_close + dividend_amount)
+    if action_type == "stock_dividend":
+        if ratio is None:
+            raise ValueError("stock_dividend event missing ratio")
+        return t_minus_1_close / (t_close * (1 + ratio))
+    if action_type == "cash_and_stock_dividend":
+        if dividend_amount is None or ratio is None:
+            raise ValueError(
+                "cash_and_stock_dividend event requires both dividend_amount and ratio"
+            )
+        return t_minus_1_close / ((t_close + dividend_amount) * (1 + ratio))
+    raise ValueError(f"Unknown action_type: {action_type!r}")
+
+
 def build_anchor(event: dict) -> Anchor:
-    """Convert a dividend-event spec into a fully-populated Anchor."""
+    """Convert a corporate-action event spec into a fully-populated Anchor."""
     ex_date_obj = datetime.strptime(event["ex_date"], "%Y-%m-%d").date()
     rows = fetch_month(event["ticker"], ex_date_obj.year, ex_date_obj.month)
     t_minus_1_close, t_close = find_anchor_closes(rows, ex_date_obj)
-    div = event["dividend_amount"]
-    # X / (Y + D) — directly the value the test asserts (not the back-adjustment
-    # factor Y / (Y + D), which is a different number; see Anchor docstring).
-    ratio = t_minus_1_close / (t_close + div)
+    dividend_amount = event.get("dividend_amount")
+    ratio = event.get("ratio")
+    expected = _compute_expected_ratio(
+        event["action_type"],
+        t_minus_1_close,
+        t_close,
+        dividend_amount,
+        ratio,
+    )
     return Anchor(
         ticker=event["ticker"],
         ex_date=event["ex_date"],
         action_type=event["action_type"],
-        dividend_amount=div,
+        dividend_amount=dividend_amount,
+        ratio=ratio,
         raw_close_t_minus_1=t_minus_1_close,
         raw_close_t=t_close,
-        expected_adj_close_ratio=ratio,
+        expected_adj_close_ratio=expected,
         source_dividend=event["source"],
     )
 
@@ -239,13 +334,19 @@ def main() -> None:
         "generated_at": datetime.now(UTC).isoformat(),
         "description": (
             "Hand-curated cross-check anchors for the adjustment function. "
-            "Each event's raw close prices are fetched from TWSE's official "
-            "STOCK_DAY endpoint; dividend amounts are from TSMC SEC 6-K "
-            "filings and TSMC IR. Sources deliberately independent of FinMind. "
-            "The `expected_adj_close_ratio` field is the value the test "
-            "asserts directly (X / (Y + D)), not the textbook back-adjustment "
-            "factor (Y / (Y + D)). See "
-            "journal/decisions/2026-05-13-adjustment-cross-check-method.md."
+            "Covers cash dividends, stock dividends, and combined cash+stock "
+            "dividends (the Taiwan large-cap convention, 除權息合一). Each "
+            "event's raw close prices are fetched from TWSE's official "
+            "STOCK_DAY endpoint; dividend amounts and stock-dividend ratios "
+            "are from primary sources (SEC 6-K for TSMC, AGM resolutions and "
+            "TWSE MOPS announcements for Taiwan Cement). Sources deliberately "
+            "independent of FinMind. The `expected_adj_close_ratio` field is "
+            "the value the test asserts directly: X / (Y + D) for cash, "
+            "X / (Y * (1 + R)) for stock, X / ((Y + D) * (1 + R)) for "
+            "combined. These are NOT the textbook back-adjustment factors "
+            "(which are Y/(Y+D), 1/(1+R), and their product respectively). "
+            "See journal/decisions/"
+            "2026-05-18-corporate-actions-ingestion-overhaul.md."
         ),
         "anchors": [asdict(a) for a in anchors],
     }
