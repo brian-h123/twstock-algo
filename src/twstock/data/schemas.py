@@ -30,21 +30,55 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
         "ticker": Column(pa.String, Check.str_matches(r"^\d{4}$")),
         "action_type": Column(
             pa.String,
-            Check.isin(["cash_dividend", "stock_dividend", "split", "rights_issue"]),
+            Check.isin(
+                [
+                    "cash_dividend",
+                    "stock_dividend",
+                    "cash_and_stock_dividend",
+                    "rights_issue",
+                    "capital_reduction",
+                ]
+            ),
         ),
         "cash_amount": Column(pa.Float64, Check.ge(0), nullable=True),
         "ratio": Column(pa.Float64, Check.greater_than(0), nullable=True),
+        "subscription_price": Column(pa.Float64, Check.greater_than(0), nullable=True),
     },
     checks=[
         Check(
-            lambda df: df.loc[df["action_type"] == "cash_dividend", "cash_amount"].notna().all(),
-            error="cash_amount required when action_type == cash_dividend",
+            lambda df: (
+                df.loc[
+                    df["action_type"].isin(["cash_dividend", "cash_and_stock_dividend"]),
+                    "cash_amount",
+                ]
+                .notna()
+                .all()
+            ),
+            error="cash_amount required for cash_dividend and cash_and_stock_dividend",
         ),
         Check(
             lambda df: (
-                df.loc[df["action_type"].isin(["split", "stock_dividend"]), "ratio"].notna().all()
+                df.loc[
+                    df["action_type"].isin(
+                        [
+                            "stock_dividend",
+                            "cash_and_stock_dividend",
+                            "rights_issue",
+                            "capital_reduction",
+                        ]
+                    ),
+                    "ratio",
+                ]
+                .notna()
+                .all()
             ),
-            error="ratio required when action_type is split or stock dividend",
+            error="ratio required for all action_types except cash_dividend",
+        ),
+        Check(
+            lambda df: (
+                df.loc[df["action_type"] == "rights_issue", "subscription_price"].notna().all()
+            ),
+            error="subscription_price required when action_type == rights_issue",
         ),
     ],
 )
