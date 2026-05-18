@@ -17,10 +17,29 @@ def _compute_factor(action: pd.Series, ref_close: float) -> float:
         return ref_close / (ref_close + cash_amount)
     elif action_type == "stock_dividend":
         return 1.0 / (1.0 + action["ratio"])
-    elif action_type == "split":
-        return 1.0 / action["ratio"]
+    elif action_type == "cash_and_stock_dividend":
+        cash_amount = action["cash_amount"]
+        ratio = action["ratio"]
+        if cash_amount >= ref_close:
+            raise ValueError(
+                f"cash_amount ({cash_amount}) >= ref_close ({ref_close}) "
+                f"for {action['ticker']} on {action['ex_date']} — bad corporate actions data"
+            )
+        # Single combined factor avoids floating-point accumulation from chaining
+        # and eliminates any ordering ambiguity between the cash and stock legs.
+        return (ref_close / (ref_close + cash_amount)) * (1.0 / (1.0 + ratio))
     elif action_type == "rights_issue":
-        return 1.0 / (1.0 + action["ratio"])
+        ratio = action["ratio"]
+        sub_price = action["subscription_price"]
+        # TWSE rights-issue back-adjustment: new reference price =
+        # (Y + ratio * sub_price) / (1 + ratio); factor adjusts pre-ex prices
+        # so they are on the same scale as that reference.
+        return (ref_close + ratio * sub_price) / (ref_close * (1.0 + ratio))
+    elif action_type == "capital_reduction":
+        # ratio = PostReductionReferencePrice / ClosingPriceonTheLastTradingDay.
+        # Applied directly: pre-event prices are scaled by this ratio so that
+        # the T-1 bar continuity-adjusts to the post-reduction reference price.
+        return action["ratio"]
     else:
         raise ValueError(
             f"Unknown action_type '{action_type}' for {action['ticker']} on {action['ex_date']}"
@@ -30,9 +49,10 @@ def _compute_factor(action: pd.Series, ref_close: float) -> float:
 def adjust(raw_ohlcv: pd.DataFrame, corporate_actions: pd.DataFrame) -> pd.DataFrame:
     """Apply back-adjustment to raw OHLCV prices using corporate actions.
 
-    Adjusts open, high, low, and close for cash dividends, stock dividends,
-    splits, and rights issues. Volume is left unchanged. Current prices are
-    never modified — only bars prior to each ex_date are scaled.
+    Adjusts open, high, low, and close for all five action types: cash_dividend,
+    stock_dividend, cash_and_stock_dividend, rights_issue, and capital_reduction.
+    Volume is left unchanged. Current prices are never modified — only bars prior
+    to each ex_date are scaled.
 
     Pure: no I/O, same inputs always produce the same output.
 
@@ -45,8 +65,8 @@ def adjust(raw_ohlcv: pd.DataFrame, corporate_actions: pd.DataFrame) -> pd.DataF
         open/high/low/close back-adjusted.
 
     Raises:
-        ValueError: If a cash_dividend action has cash_amount >= ref_close,
-            indicating bad corporate actions data.
+        ValueError: If a cash_dividend or cash_and_stock_dividend action has
+            cash_amount >= ref_close, indicating bad corporate actions data.
     """
     if corporate_actions.empty:
         return raw_ohlcv.copy()
