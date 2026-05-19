@@ -93,22 +93,31 @@ def test_ohlcv_rejects_high_below_close():
 
 
 # ---------------------------------------------------------------------------
-# CORPORATE_ACTIONS_SCHEMA — happy path
+# CORPORATE_ACTIONS_SCHEMA — happy path (all five types)
 # ---------------------------------------------------------------------------
 
 
 def test_corporate_actions_valid_df_passes():
     df = pd.DataFrame(
         {
-            "ex_date": pd.to_datetime(["2023-07-18", "2022-09-20", "2021-10-05"]),
-            "ticker": ["2330", "2330", "2330"],
-            "action_type": ["cash_dividend", "stock_dividend", "split"],
-            "cash_amount": [3.0, None, None],
-            "ratio": [None, 1.05, 2.0],
+            "ex_date": pd.to_datetime(
+                ["2023-07-18", "2022-09-20", "2022-07-21", "2021-06-15", "2020-08-10"]
+            ),
+            "ticker": ["2330"] * 5,
+            "action_type": [
+                "cash_dividend",
+                "stock_dividend",
+                "cash_and_stock_dividend",
+                "rights_issue",
+                "capital_reduction",
+            ],
+            "cash_amount": [3.0, None, 1.5, None, None],
+            "ratio": [None, 0.05, 0.02, 0.18, 1.225],
+            "subscription_price": [None, None, None, 17.0, None],
         }
     )
     result = validate(df, CORPORATE_ACTIONS_SCHEMA)
-    assert len(result) == 3
+    assert len(result) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +133,22 @@ def test_corporate_actions_rejects_invalid_action_type():
             "action_type": ["buyback"],  # not in the allowed set
             "cash_amount": [float("nan")],
             "ratio": [float("nan")],
+            "subscription_price": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_corporate_actions_rejects_split_as_invalid_type():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2023-07-18"]),
+            "ticker": ["2330"],
+            "action_type": ["split"],  # renamed to capital_reduction; split is no longer valid
+            "cash_amount": [float("nan")],
+            "ratio": [2.0],
+            "subscription_price": [float("nan")],
         }
     )
     with pytest.raises(ValueError):
@@ -138,6 +163,7 @@ def test_corporate_actions_rejects_bad_ticker():
             "action_type": ["cash_dividend"],
             "cash_amount": [3.0],
             "ratio": [float("nan")],
+            "subscription_price": [float("nan")],
         }
     )
     with pytest.raises(ValueError):
@@ -157,20 +183,37 @@ def test_cash_dividend_requires_cash_amount():
             "action_type": ["cash_dividend"],
             "cash_amount": [float("nan")],  # violation
             "ratio": [float("nan")],
+            "subscription_price": [float("nan")],
         }
     )
     with pytest.raises(ValueError):
         validate(df, CORPORATE_ACTIONS_SCHEMA)
 
 
-def test_split_requires_ratio():
+def test_cash_and_stock_dividend_requires_cash_amount():
     df = pd.DataFrame(
         {
-            "ex_date": pd.to_datetime(["2021-10-05"]),
-            "ticker": ["2330"],
-            "action_type": ["split"],
-            "cash_amount": [float("nan")],
+            "ex_date": pd.to_datetime(["2022-07-21"]),
+            "ticker": ["1101"],
+            "action_type": ["cash_and_stock_dividend"],
+            "cash_amount": [float("nan")],  # violation
+            "ratio": [0.02],
+            "subscription_price": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_cash_and_stock_dividend_requires_ratio():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2022-07-21"]),
+            "ticker": ["1101"],
+            "action_type": ["cash_and_stock_dividend"],
+            "cash_amount": [1.5],
             "ratio": [float("nan")],  # violation
+            "subscription_price": [float("nan")],
         }
     )
     with pytest.raises(ValueError):
@@ -185,6 +228,52 @@ def test_stock_dividend_requires_ratio():
             "action_type": ["stock_dividend"],
             "cash_amount": [float("nan")],
             "ratio": [float("nan")],  # violation
+            "subscription_price": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_rights_issue_requires_ratio():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2021-06-15"]),
+            "ticker": ["3312"],
+            "action_type": ["rights_issue"],
+            "cash_amount": [float("nan")],
+            "ratio": [float("nan")],  # violation
+            "subscription_price": [17.0],
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_rights_issue_requires_subscription_price():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2021-06-15"]),
+            "ticker": ["3312"],
+            "action_type": ["rights_issue"],
+            "cash_amount": [float("nan")],
+            "ratio": [0.18],
+            "subscription_price": [float("nan")],  # violation
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_capital_reduction_requires_ratio():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2020-08-10"]),
+            "ticker": ["2330"],
+            "action_type": ["capital_reduction"],
+            "cash_amount": [float("nan")],
+            "ratio": [float("nan")],  # violation
+            "subscription_price": [float("nan")],
         }
     )
     with pytest.raises(ValueError):
@@ -199,6 +288,22 @@ def test_cash_dividend_null_ratio_is_ok():
             "action_type": ["cash_dividend"],
             "cash_amount": [3.0],
             "ratio": [float("nan")],  # ratio not required for cash_dividend
+            "subscription_price": [float("nan")],
+        }
+    )
+    result = validate(df, CORPORATE_ACTIONS_SCHEMA)
+    assert len(result) == 1
+
+
+def test_rights_issue_null_cash_amount_is_ok():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2021-06-15"]),
+            "ticker": ["3312"],
+            "action_type": ["rights_issue"],
+            "cash_amount": [float("nan")],  # not required for rights_issue
+            "ratio": [0.18],
+            "subscription_price": [17.0],
         }
     )
     result = validate(df, CORPORATE_ACTIONS_SCHEMA)

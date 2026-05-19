@@ -198,6 +198,7 @@ def _make_ca(ticker="2330", ex_dates=("2023-07-01",), action_type="cash_dividend
             "action_type": [action_type] * n,
             "cash_amount": [3.0] * n,
             "ratio": [float("nan")] * n,
+            "subscription_price": [float("nan")] * n,
         }
     )
 

@@ -33,9 +33,24 @@ def test_full_backfill_one_ticker(source):
     assert {"date", "ticker", "open", "high", "low", "close", "volume"}.issubset(df_ohlcv.columns)
 
     assert len(df_actions) > 0
-    assert {"ex_date", "ticker", "action_type", "cash_amount", "ratio"}.issubset(df_actions.columns)
+    assert {
+        "ex_date",
+        "ticker",
+        "action_type",
+        "cash_amount",
+        "ratio",
+        "subscription_price",
+    }.issubset(df_actions.columns)
     assert (
         df_actions["action_type"]
-        .isin(["cash_dividend", "stock_dividend", "split", "rights_issue"])
+        .isin(
+            [
+                "cash_dividend",
+                "stock_dividend",
+                "cash_and_stock_dividend",
+                "rights_issue",
+                "capital_reduction",
+            ]
+        )
         .all()
     )

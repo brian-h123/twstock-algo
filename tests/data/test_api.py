@@ -34,7 +34,9 @@ def _ohlcv(dates: list[str], closes: list[float], ticker: str = "2330") -> pd.Da
 
 
 def _empty_actions() -> pd.DataFrame:
-    return pd.DataFrame(columns=["ex_date", "ticker", "action_type", "cash_amount", "ratio"])
+    return pd.DataFrame(
+        columns=["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]
+    )
 
 
 def _cash_div(ex_date: str, cash_amount: float, ticker: str = "2330") -> pd.DataFrame:
@@ -45,6 +47,7 @@ def _cash_div(ex_date: str, cash_amount: float, ticker: str = "2330") -> pd.Data
             "action_type": ["cash_dividend"],
             "cash_amount": [float(cash_amount)],
             "ratio": [float("nan")],
+            "subscription_price": [float("nan")],
         }
     )
 
@@ -133,57 +136,52 @@ def test_get_universe_returns_50_tickers():
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def adj_2330() -> pd.DataFrame:
-    if get_ticker_date_range("2330") is None:
-        pytest.skip("2330 not backfilled; run scripts/backfill.py first")
-    return get_adjusted_history("2330", start="2016-01-01")
-
-
-@pytest.fixture(scope="module")
-def raw_2330() -> pd.DataFrame:
-    if get_ticker_date_range("2330") is None:
-        pytest.skip("2330 not backfilled; run scripts/backfill.py first")
-    return read_ohlcv("2330", start=date(2016, 1, 1)).set_index("date")
-
-
-@pytest.mark.parametrize("anchor", _ANCHORS, ids=lambda a: a["ex_date"])
-def test_adjustment_anchors(anchor, adj_2330):
+@pytest.mark.parametrize("anchor", _ANCHORS, ids=lambda a: f"{a['ticker']}_{a['ex_date']}")
+def test_adjustment_anchors(anchor):
     """Adjusted-close ratio across each ex_date must match the expected back-adjustment factor
-    within 0.01% relative tolerance."""
+    within 0.01% relative tolerance. Loads the correct ticker's data for each anchor."""
+    ticker = anchor["ticker"]
+    if get_ticker_date_range(ticker) is None:
+        pytest.skip(f"{ticker} not backfilled; run scripts/backfill.py first")
+    adj = get_adjusted_history(ticker, start="2016-01-01")
     ex_date = pd.Timestamp(anchor["ex_date"])
-    prior = adj_2330[adj_2330.index < ex_date]
+    prior = adj[adj.index < ex_date]
     assert not prior.empty, f"No adjusted data before ex_date {anchor['ex_date']}"
 
     t_minus_1 = prior.index[-1]
-    adj_t_minus_1 = adj_2330.loc[t_minus_1, "close"]
-    adj_t = adj_2330.loc[ex_date, "close"]
+    adj_t_minus_1 = adj.loc[t_minus_1, "close"]
+    adj_t = adj.loc[ex_date, "close"]
 
     observed_ratio = adj_t_minus_1 / adj_t
     expected_ratio = anchor["expected_adj_close_ratio"]
 
     assert observed_ratio == pytest.approx(expected_ratio, rel=1e-4), (
-        f"Anchor {anchor['ex_date']}: ratio {observed_ratio:.8f} != expected {expected_ratio:.8f}"
+        f"Anchor {ticker} {anchor['ex_date']}: "
+        f"ratio {observed_ratio:.8f} != expected {expected_ratio:.8f}"
     )
 
 
-@pytest.mark.parametrize("anchor", _ANCHORS, ids=lambda a: a["ex_date"])
-def test_raw_close_fidelity(anchor, raw_2330):
+@pytest.mark.parametrize("anchor", _ANCHORS, ids=lambda a: f"{a['ticker']}_{a['ex_date']}")
+def test_raw_close_fidelity(anchor):
     """Raw closes from storage must match TWSE anchor prices within 0.1%.
     Kept separate from test_adjustment_anchors so math failures and data failures
     are distinguishable."""
+    ticker = anchor["ticker"]
+    if get_ticker_date_range(ticker) is None:
+        pytest.skip(f"{ticker} not backfilled; run scripts/backfill.py first")
+    raw = read_ohlcv(ticker, start=date(2016, 1, 1)).set_index("date")
     ex_date = pd.Timestamp(anchor["ex_date"])
-    prior = raw_2330[raw_2330.index < ex_date]
+    prior = raw[raw.index < ex_date]
     assert not prior.empty, f"No raw data before ex_date {anchor['ex_date']}"
 
     raw_t_minus_1 = float(prior.iloc[-1]["close"])
-    raw_t = float(raw_2330.loc[ex_date, "close"])
+    raw_t = float(raw.loc[ex_date, "close"])
 
     assert raw_t_minus_1 == pytest.approx(anchor["raw_close_t_minus_1"], rel=1e-3), (
-        f"T-1 raw close mismatch on {anchor['ex_date']}: "
+        f"T-1 raw close mismatch on {ticker} {anchor['ex_date']}: "
         f"got {raw_t_minus_1}, expected {anchor['raw_close_t_minus_1']}"
     )
     assert raw_t == pytest.approx(anchor["raw_close_t"], rel=1e-3), (
-        f"T raw close mismatch on {anchor['ex_date']}: "
+        f"T raw close mismatch on {ticker} {anchor['ex_date']}: "
         f"got {raw_t}, expected {anchor['raw_close_t']}"
     )
