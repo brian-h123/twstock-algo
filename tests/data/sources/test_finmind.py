@@ -1,6 +1,7 @@
 import os
 from datetime import date
 
+import pandas as pd
 import pytest
 from dotenv import load_dotenv
 
@@ -73,3 +74,42 @@ def test_get_corporate_actions_returns_valid_schema(source):
         )
         .all()
     )
+
+
+# ---------------------------------------------------------------------------
+# _build_capital_reductions — deduplication unit tests
+# ---------------------------------------------------------------------------
+
+_CR_ROW_BASE = {
+    "stock_id": "2327",
+    "ClosingPriceonTheLastTradingDay": 400.0,
+    "PostReductionReferencePrice": 498.81,
+    "LimitUp": 548.0,
+    "LimitDown": 448.0,
+    "OpeningReferencePrice": 498.81,
+    "ExrightReferencePrice": 0.0,
+    "ReasonforCapitalReduction": "現金減資",
+}
+
+
+def test_build_capital_reductions_drops_suspension_start_duplicate(source):
+    # FinMind emits two rows per event: suspension-start date and ex-date.
+    # All non-date fields are identical. Only the ex-date row (later) should survive.
+    rows = [
+        {"date": "2022-10-21", **_CR_ROW_BASE},
+        {"date": "2022-10-31", **_CR_ROW_BASE},
+    ]
+    df = source._build_capital_reductions(rows)
+    assert len(df) == 1
+    assert df.iloc[0]["ex_date"] == pd.Timestamp("2022-10-31")
+
+
+def test_build_capital_reductions_preserves_distinct_events(source):
+    # Two rows sharing price fields but differing on a non-date field
+    # (different ReasonforCapitalReduction) — not genuine duplicates, both kept.
+    rows = [
+        {"date": "2021-10-31", **_CR_ROW_BASE},
+        {"date": "2022-10-31", **{**_CR_ROW_BASE, "ReasonforCapitalReduction": "彌補虧損"}},
+    ]
+    df = source._build_capital_reductions(rows)
+    assert len(df) == 2

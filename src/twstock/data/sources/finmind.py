@@ -282,9 +282,18 @@ class FinMindSource(DataSource):
         )[["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]]
 
     def _build_capital_reductions(self, reduction_data: list[dict]) -> pd.DataFrame:
-        df_red = pd.DataFrame(reduction_data)[
+        df_raw = pd.DataFrame(reduction_data)
+        # FinMind emits two rows per event: one for the trading-suspension start
+        # and one for the first post-reduction trading day. Both are identical in
+        # every field except `date`. Dedup on the full non-date row so that rows
+        # sharing price fields but differing on any other column (LimitUp,
+        # ReasonforCapitalReduction, etc.) are preserved as distinct events.
+        df_raw = df_raw.sort_values("date").drop_duplicates(
+            subset=[c for c in df_raw.columns if c != "date"], keep="last"
+        )
+        df_red = df_raw[
             ["date", "stock_id", "ClosingPriceonTheLastTradingDay", "PostReductionReferencePrice"]
-        ]
+        ].copy()
         df_red["action_type"] = "capital_reduction"
         df_red["ratio"] = (
             df_red["PostReductionReferencePrice"] / df_red["ClosingPriceonTheLastTradingDay"]

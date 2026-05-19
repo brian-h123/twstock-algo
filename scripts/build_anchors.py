@@ -1,12 +1,13 @@
 """Build adjustment cross-check anchor fixture from TWSE official + primary dividend sources.
 
 This script fetches raw close prices directly from TWSE's STOCK_DAY endpoint
-(independent of FinMind) and combines them with dividend amounts sourced from
-TSMC SEC 6-K filings, TSMC IR, and Taiwan Cement (TSC) AGM resolutions / TWSE
-MOPS announcements. The output is a JSON fixture used by the adjustment
-cross-validation test in Phase 1.
+(independent of FinMind) and combines them with dividend amounts and capital-
+reduction parameters sourced from SEC 6-K filings (TSMC), AGM resolutions /
+TWSE MOPS announcements (Taiwan Cement, Yageo), and corroborating news reports.
+The output is a JSON fixture used by the adjustment cross-validation test in
+Phase 1.
 
-Three event types are supported, each with its own local-invariant formula
+Four event types are supported, each with its own local-invariant formula
 applied at ex-date T (raw_close[T-1] = X, raw_close[T] = Y):
 
   cash_dividend (amount D):
@@ -21,6 +22,19 @@ applied at ex-date T (raw_close[T-1] = X, raw_close[T] = Y):
   convention for large-cap distributions, 除權息合一):
       back-adj factor = Y / (Y + D) * 1 / (1 + R)
       adj_close[T-1] / adj_close[T] = X / ((Y + D) * (1 + R))
+
+  capital_reduction (ratio R = new_shares/old_shares with R <= 1, plus cash
+  refund C per OLD share — C = 0 for pure 彌補虧損減資 loss-coverage events,
+  C > 0 for 現金減資 cash-refund events). TWSE sets the ex-reduction
+  reference price PostRef = (X - C) / R. The back-adjustment factor scales
+  pre-event prices so T-1 continuity-adjusts to PostRef:
+      back-adj factor = (X - C) / (R * X) = PostRef / X
+      adj_close[T-1] / adj_close[T] = (X - C) / (R * Y)
+  Note: the wealth-continuity identity X ≈ R*Y + C (equivalently, the
+  alternative formula X / (R*Y + C)) holds only when Y = PostRef exactly,
+  which is rarely the case in practice — use (X - C) / (R * Y) instead.
+  At C=0: degenerates to X / (R*Y) = (1/R) * (X/Y), the pure share-count
+  adjustment.
 
 Run from project root:
     uv run python scripts/build_anchors.py
@@ -43,17 +57,18 @@ OUTPUT_PATH = Path("tests/fixtures/anchor_dividends.json")
 THROTTLE_SECONDS = 3.0  # TWSE is sensitive to rapid requests; be polite.
 
 
-# ----- Dividend reference data --------------------------------------------------
+# ----- Corporate-action reference data ------------------------------------------
 #
-# Each entry is a verified corporate-action event. Dividend amounts and stock-
-# dividend ratios come from primary sources (SEC 6-K, company IR / AGM
-# resolutions, TWSE MOPS announcements). These are NOT sourced from FinMind —
-# that is intentional. The cross-check loses meaning if both sides come from
-# the same upstream pipeline.
+# Each entry is a verified corporate-action event. Dividend amounts, stock-
+# dividend ratios, and capital-reduction parameters come from primary sources
+# (SEC 6-K, company IR / AGM resolutions, TWSE MOPS announcements). These are
+# NOT sourced from FinMind — that is intentional. The cross-check loses meaning
+# if both sides come from the same upstream pipeline.
 #
 # Coverage:
 #   - TSMC (2330) cash dividends, post-2018
 #   - Taiwan Cement (1101) combined cash + stock dividends, 2020 and 2022
+#   - Yageo (2327) cash capital reduction, 2022
 #
 # Sources used:
 #   - SEC EDGAR Form 6-K filings (TSMC files quarterly with the US SEC because
@@ -63,6 +78,9 @@ THROTTLE_SECONDS = 3.0  # TWSE is sensitive to rapid requests; be polite.
 #     used as a cross-check of the SEC filings)
 #   - Taiwan Cement AGM resolutions + TWSE MOPS ex-rights/ex-dividend
 #     announcements for 1101 (2020-08-12 and 2022-07-21)
+#   - Yageo TWSE-filed corporate-action plan (via MOPS), Liberty Times and UDN
+#     news reports quoting that filing, and TWSE's published ex-reduction
+#     reference price for 2327 (ex-date 2022-10-31)
 #
 # Pure stock-dividend events (no cash component on the same ex-date) are
 # essentially absent from TWSE Top 50 post-2015 — Taiwan companies almost
@@ -71,6 +89,12 @@ THROTTLE_SECONDS = 3.0  # TWSE is sensitive to rapid requests; be polite.
 # build_anchor logic for future use (e.g. small-cap pure-stock events,
 # splits handled as ratio-only adjustments) but no real anchor of that type
 # is currently included.
+#
+# Capital reduction events on Taiwan equities most often take the cash-refund
+# form (現金減資). The Yageo 2022 event below is a clean cash-refund reduction
+# with no concurrent dividend or stock split — ideal for exercising both the
+# R (share-count) and C (cash-per-share) branches of the capital_reduction
+# formula in a single anchor.
 
 ANCHOR_EVENTS: list[dict] = [
     {
@@ -161,6 +185,71 @@ ANCHOR_EVENTS: list[dict] = [
             "cross-check two independent combined-event data points."
         ),
     },
+    {
+        # Yageo Corp 2022 cash capital reduction (現金減資).
+        #
+        # Field semantics for capital_reduction:
+        #   ratio            = new_shares / old_shares (R, <= 1)
+        #   dividend_amount  = cash refund per OLD share (C, NT$)
+        #
+        # Exact figures derived from Yageo's TWSE-filed corporate-action plan:
+        #   shares eliminated         = 108,011,200
+        #   pre-event outstanding     = 529,272,005  (= 544,060,005 issued
+        #                                              less 14,788,000 treasury
+        #                                              shares awaiting cancellation)
+        #   elimination ratio         = 108,011,200 / 529,272,005
+        #                             = 0.20407502943  (exact)
+        #   R = 1 - elimination ratio = 0.79592497057
+        #   C = NT$10 par × elim_ratio = NT$2.0407502943 per old share
+        #
+        # Headline news rounds these to "20% reduction / NT$2 cash refund" but
+        # the full-precision numbers are required at the anchor test's
+        # rel=1e-4 tolerance — the rounded figures would fail.
+        "ticker": "2327",
+        "ex_date": "2022-10-31",
+        "action_type": "capital_reduction",
+        "dividend_amount": 2.0407502943,
+        "ratio": 0.79592497057,
+        "source": (
+            "Yageo Corp (2327) cash capital reduction (現金減資). Board "
+            "resolution 2022-03-17, AGM-approved June 2022. Per Yageo's "
+            "TWSE-filed corporate-action plan: 108,011,200 shares eliminated "
+            "from a pre-event outstanding base of 529,272,005 shares "
+            "(= 544,060,005 issued less 14,788,000 treasury shares awaiting "
+            "cancellation), giving exact elimination ratio "
+            "108,011,200 / 529,272,005 = 0.20407502943, R = 0.79592497057 "
+            "(i.e. 795.92497057 new shares per 1,000 old shares), and cash "
+            "refund NT$2.0407502943 per OLD share (= NT$10 par × elimination "
+            "ratio). Trading suspended 2022-10-20 to 2022-10-28; reduction "
+            "record date 2022-10-28; new shares first traded 2022-10-31 at "
+            "TWSE-set ex-reduction reference price NT$334.15. "
+            "Cross-validated against THREE documents that do not share the "
+            "FinMind pipeline: (1) Yageo's MOPS-filed cash-reduction operational plan "
+            "(主旨: 公告本公司董事會訂定換股作業計劃及減資換發股票基準日等相關事宜), "
+            "announcement 序號 1 dated 民國111年09月13日 17:06:49 at "
+            "https://mops.twse.com.tw/mops/web/t05st09_2 — directly states "
+            "529,272,005 outstanding shares, 108,011,200 shares eliminated, "
+            "NT$2.0407502943 cash refund per old share, basis date "
+            "2022-10-28, new shares first traded 2022-10-31. Confirmed by "
+            "Yageo's subsequent post-completion filing (主旨: 公告本公司辦理"
+            "現金減資完成實收資本額變更登記) dated 2022-09-16 reporting "
+            "final outstanding count 436,048,805 (= 421,260,805 + 14,788,000 "
+            "treasury yet to be cancelled). Cross-validated against (2) "
+            "Liberty Times Net news report at "
+            "https://ec.ltn.com.tw/article/breakingnews/4056976 (2022-09-13) "
+            "and (3) UDN report on TWSE's published ex-reduction reference "
+            "price NT$334.15 at "
+            "https://money.udn.com/money/story/5607/6727376 (2022-10-31). "
+            "All sources agree precisely on share counts, refund per share, "
+            "and TWSE-set reference price. "
+            "Picked because: (a) clean single-action ex-date — no concurrent "
+            "dividend or stock split, (b) modest representative ratio "
+            "(~20% reduction) — avoiding extreme cases, (c) cash-refund "
+            "event rather than pure loss-coverage, so the anchor exercises "
+            "BOTH the R (share-count) and C (cash-per-share) branches of "
+            "the capital_reduction formula in a single event."
+        ),
+    },
 ]
 
 
@@ -175,6 +264,12 @@ class Anchor:
         cash_dividend            → dividend_amount set, ratio = None
         stock_dividend           → dividend_amount = None, ratio set
         cash_and_stock_dividend  → both dividend_amount and ratio set
+                                  (ratio = stock-dividend fraction, e.g. 0.10
+                                   means 100 new shares per 1,000 existing)
+        capital_reduction        → both dividend_amount and ratio set
+                                  (ratio = new_shares / old_shares, R <= 1;
+                                   dividend_amount = cash refund per OLD
+                                   share, 0.0 for pure loss-coverage events)
 
     `expected_adj_close_ratio` is the precomputed value the cross-validation
     test asserts the user's adjusted-close series matches across this event.
@@ -183,13 +278,15 @@ class Anchor:
         cash_dividend            → X / (Y + dividend_amount)
         stock_dividend           → X / (Y * (1 + ratio))
         cash_and_stock_dividend  → X / ((Y + dividend_amount) * (1 + ratio))
+        capital_reduction        → (X - dividend_amount) / (ratio * Y)
 
     These ratios all sit near 1.0 for a "clean" market reaction to the event
-    (i.e. when raw_close[T] equals the theoretical ex-rights/ex-div reference
-    price); intraday moves on the ex-date push the ratio off 1.0 by the
-    daily-return magnitude. The textbook back-adjustment *factors* (e.g.
-    Y/(Y+D) for cash, 1/(1+R) for stock) are different numbers than what is
-    stored here; the test uses these ratios directly.
+    (i.e. when raw_close[T] equals the theoretical ex-rights/ex-div / ex-
+    reduction reference price); intraday moves on the ex-date push the ratio
+    off 1.0 by the daily-return magnitude. The textbook back-adjustment
+    *factors* (e.g. Y/(Y+D) for cash, 1/(1+R) for stock, Y/(R*Y+C) for
+    capital reduction) are different numbers than what is stored here; the
+    test uses these ratios directly.
     """
 
     ticker: str
@@ -248,6 +345,14 @@ def find_anchor_closes(rows: list[dict], ex_date: date) -> tuple[float, float]:
     If ex_date is the first trading day of the month, the previous trading day
     falls into the previous month — caller is responsible for handling this
     edge case (none of the curated anchors trigger it).
+
+    For capital_reduction events with a multi-day trading suspension preceding
+    the ex-date (e.g. Yageo 2022: suspended 10-20 through 10-28, ex-date
+    10-31), the most recent trading day for that ticker before ex_date is the
+    last day of normal trading before suspension (here, 10-19). Because the
+    TWSE STOCK_DAY endpoint only returns rows on trading days for the queried
+    ticker, suspension days simply do not appear in `rows` and the "most
+    recent prior trading day" logic remains correct without special handling.
     """
     rows_sorted = sorted(rows, key=lambda r: r["date"])
     t_row = next((r for r in rows_sorted if r["date"] == ex_date), None)
@@ -291,6 +396,16 @@ def _compute_expected_ratio(
                 "cash_and_stock_dividend event requires both dividend_amount and ratio"
             )
         return t_minus_1_close / ((t_close + dividend_amount) * (1 + ratio))
+    if action_type == "capital_reduction":
+        if ratio is None:
+            raise ValueError("capital_reduction event missing ratio (new_shares / old_shares)")
+        if dividend_amount is None:
+            raise ValueError(
+                "capital_reduction event missing dividend_amount "
+                "(cash refund per OLD share; use 0.0 for pure loss-coverage "
+                "reductions with no cash component)"
+            )
+        return (t_minus_1_close - dividend_amount) / (ratio * t_close)
     raise ValueError(f"Unknown action_type: {action_type!r}")
 
 
@@ -334,17 +449,21 @@ def main() -> None:
         "generated_at": datetime.now(UTC).isoformat(),
         "description": (
             "Hand-curated cross-check anchors for the adjustment function. "
-            "Covers cash dividends, stock dividends, and combined cash+stock "
-            "dividends (the Taiwan large-cap convention, 除權息合一). Each "
-            "event's raw close prices are fetched from TWSE's official "
-            "STOCK_DAY endpoint; dividend amounts and stock-dividend ratios "
-            "are from primary sources (SEC 6-K for TSMC, AGM resolutions and "
-            "TWSE MOPS announcements for Taiwan Cement). Sources deliberately "
-            "independent of FinMind. The `expected_adj_close_ratio` field is "
-            "the value the test asserts directly: X / (Y + D) for cash, "
-            "X / (Y * (1 + R)) for stock, X / ((Y + D) * (1 + R)) for "
-            "combined. These are NOT the textbook back-adjustment factors "
-            "(which are Y/(Y+D), 1/(1+R), and their product respectively). "
+            "Covers cash dividends, stock dividends, combined cash+stock "
+            "dividends (the Taiwan large-cap convention, 除權息合一), and "
+            "cash capital reductions (現金減資). Each event's raw close "
+            "prices are fetched from TWSE's official STOCK_DAY endpoint; "
+            "dividend amounts, stock-dividend ratios, and capital-reduction "
+            "parameters are from primary sources (SEC 6-K for TSMC, AGM "
+            "resolutions and TWSE MOPS announcements for Taiwan Cement, "
+            "TWSE-filed corporate-action plan and corroborating news for "
+            "Yageo). Sources deliberately independent of FinMind. The "
+            "`expected_adj_close_ratio` field is the value the test asserts "
+            "directly: X / (Y + D) for cash, X / (Y * (1 + R)) for stock, "
+            "X / ((Y + D) * (1 + R)) for combined, (X - C) / (R * Y) for "
+            "capital reduction. These are NOT the textbook back-adjustment "
+            "factors (which are Y/(Y+D), 1/(1+R), their product, and "
+            "(X-C)/(R*X) respectively). "
             "See journal/decisions/"
             "2026-05-18-corporate-actions-ingestion-overhaul.md."
         ),
