@@ -4,7 +4,12 @@ import pandas as pd
 import streamlit as st
 
 from twstock.ui.charts import candlestick_volume, compute_bollinger, compute_sma
-from twstock.ui.data_loader import get_available_range, load_adjusted, load_raw
+from twstock.ui.data_loader import (
+    get_available_range,
+    load_adjusted,
+    load_corporate_actions,
+    load_raw,
+)
 from twstock.ui.names import display_label
 from twstock.universe import get_top50_universe
 
@@ -63,6 +68,8 @@ def main() -> None:
     sma_60 = st.sidebar.checkbox(label="SMA(60)", value=True)
     bbands = st.sidebar.checkbox(label="Bollinger Bands", value=False)
 
+    ex_date_show = st.sidebar.checkbox(label="Ex-date markers", value=True)
+
     if price_view == "Adjusted":
         df = load_adjusted(ticker=ticker, start=start, end=end)
     else:
@@ -107,7 +114,21 @@ def main() -> None:
     with col4:
         st.metric(label="52-wk Range", value=range_str)
 
-    fig = candlestick_volume(df=df, overlays=overlays, title=f"{display_label(ticker)}")
+    if ex_date_show:
+        ca = load_corporate_actions(ticker=ticker)
+        mask = (ca["ex_date"] >= pd.Timestamp(start)) & (ca["ex_date"] <= pd.Timestamp(end))
+        ex_date_markers = ca[mask].rename(
+            columns={"ex_date": "date", "cash_amount": "cash_dividend", "ratio": "stock_ratio"}
+        )
+    else:
+        ex_date_markers = None
+
+    fig = candlestick_volume(
+        df=df,
+        overlays=overlays,
+        ex_date_markers=ex_date_markers,
+        title=display_label(ticker),
+    )
     st.plotly_chart(fig, width="stretch")
 
 
