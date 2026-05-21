@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pandas as pd
 import streamlit as st
 
 from twstock.ui.charts import candlestick_volume, compute_bollinger, compute_sma
@@ -80,6 +81,31 @@ def main() -> None:
         overlays["BB lower"], overlays["BB mid"], overlays["BB upper"] = compute_bollinger(
             close=df["close"]
         )
+
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+    last_close = df["close"].iloc[-1]
+    prev_close = df["close"].iloc[-2] if len(df) >= 2 else None
+    if prev_close is not None and pd.notna(prev_close) and pd.notna(last_close):
+        change = last_close - prev_close
+        pct = change / prev_close * 100
+        change_str = f"{change:+.2f}"
+        delta_str = f"{pct:+.2f}%"
+    else:
+        change_str = "—"
+        delta_str = None
+
+    window = df["close"].tail(252)
+    low_52, high_52 = window.min(), window.max()
+    range_str = f"{low_52:.0f} - {high_52:.0f}" if pd.notna(low_52) else "—"
+
+    with col1:
+        st.metric(label="Ticker name", value=display_label(ticker).split(" — ")[1])
+    with col2:
+        st.metric(label="Last close", value=f"{last_close:.2f}" if pd.notna(last_close) else "—")
+    with col3:
+        st.metric(label="Daily change", value=change_str, delta=delta_str)
+    with col4:
+        st.metric(label="52-wk Range", value=range_str)
 
     fig = candlestick_volume(df=df, overlays=overlays, title=f"{display_label(ticker)}")
     st.plotly_chart(fig, width="stretch")
