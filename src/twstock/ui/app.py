@@ -3,7 +3,7 @@ from datetime import timedelta
 import streamlit as st
 
 from twstock.ui.charts import candlestick_volume
-from twstock.ui.data_loader import get_available_range, load_adjusted
+from twstock.ui.data_loader import get_available_range, load_adjusted, load_raw
 from twstock.ui.names import display_label
 from twstock.universe import get_top50_universe
 
@@ -56,7 +56,12 @@ def main() -> None:
         st.sidebar.warning("Start date is after end date — end clamped to start.")
         end = start
 
-    df = load_adjusted(ticker=ticker, start=start, end=end)
+    price_view = st.sidebar.radio("Price view", ["Adjusted", "Raw"], index=0, key="price_view")
+
+    if price_view == "Adjusted":
+        df = load_adjusted(ticker=ticker, start=start, end=end)
+    else:
+        df = load_raw(ticker=ticker, start=start, end=end)
 
     if df.empty:
         st.warning("No data available for the selected range.")
