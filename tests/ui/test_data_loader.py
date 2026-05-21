@@ -30,11 +30,11 @@ def clear_loader_caches():
 
 
 def test_load_adjusted_returns_dataframe():
-    fake = pd.DataFrame({"open": [100.0], "close": [101.0]}, index=[_START])
+    fake = pd.DataFrame({"open": [100.0], "close": [101.0]}, index=pd.Index([_START], name="date"))
     with patch("twstock.ui.data_loader.get_adjusted_history", return_value=fake) as mock_fn:
         result = load_adjusted(_TICKER, _START, _END)
         mock_fn.assert_called_once_with(_TICKER, _START, _END)
-    assert list(result.columns) == ["open", "close"]
+    assert {"date", "open", "close"}.issubset(result.columns)
 
 
 def test_load_raw_returns_dataframe():

@@ -10,7 +10,7 @@ from twstock.data.storage import get_ticker_date_range, read_corporate_actions, 
 @st.cache_data(show_spinner=False)
 def load_adjusted(ticker: str, start: date, end: date) -> pd.DataFrame:
     """Wraps twstock.data.api.get_adjusted_history."""
-    return get_adjusted_history(ticker, start, end)
+    return get_adjusted_history(ticker, start, end).reset_index()
 
 
 @st.cache_data(show_spinner=False)

@@ -64,12 +64,13 @@ def candlestick_volume(
 
     if ex_date_markers is not None and not ex_date_markers.empty:
         for _, row in ex_date_markers.iterrows():
-            fig.add_vline(x=str(row["date"]), line_dash="dash", line_color="gray", row=1, col=1)
+            ex_date_str = str(row["date"])[:10]
+            fig.add_vline(x=ex_date_str, line_dash="dash", line_color="gray")
 
             close_row = df.loc[df["date"] == row["date"], "close"]
             y_val = close_row.iloc[0] if not close_row.empty else df["close"].mean()
 
-            parts = [f"{row['date']} · {row['action_type']}"]
+            parts = [f"{ex_date_str} · {row['action_type']}"]
             if pd.notna(row.get("cash_dividend")) and row["cash_dividend"] != 0:
                 parts.append(f"cash={row['cash_dividend']}")
             if pd.notna(row.get("stock_ratio")) and row["stock_ratio"] != 0:
@@ -89,6 +90,11 @@ def candlestick_volume(
                 col=1,
             )
 
-    fig.update_xaxes(rangeslider_visible=False)
+    full_range = pd.date_range(df["date"].min(), df["date"].max(), freq="D")
+    missing_dates = full_range.difference(pd.DatetimeIndex(df["date"]))
+    fig.update_xaxes(
+        rangebreaks=[dict(values=missing_dates.strftime("%Y-%m-%d").tolist())],
+        rangeslider_visible=False,
+    )
     fig.update_layout(title=title)
     return fig
