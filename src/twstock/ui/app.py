@@ -17,27 +17,31 @@ ticker = selected_label.split(" — ")[0]
 
 avail_start, avail_end = get_available_range(ticker)
 
-# Clamp any persisted date state to the new ticker's available range BEFORE
-# rendering the inputs — Streamlit reads session_state first for keyed widgets.
-if "start_date" in st.session_state:
+default_start = max(avail_start, avail_end - timedelta(days=730))
+
+# Initialize session state on first render; clamp on every subsequent rerun.
+# Never pass value= alongside a session_state key — Streamlit treats them as
+# conflicting sources of truth and warns.
+if "start_date" not in st.session_state:
+    st.session_state["start_date"] = default_start
+else:
     st.session_state["start_date"] = min(
         max(st.session_state["start_date"], avail_start), avail_end
     )
-if "end_date" in st.session_state:
-    st.session_state["end_date"] = min(max(st.session_state["end_date"], avail_start), avail_end)
 
-default_start = max(avail_start, avail_end - timedelta(days=730))
+if "end_date" not in st.session_state:
+    st.session_state["end_date"] = avail_end
+else:
+    st.session_state["end_date"] = min(max(st.session_state["end_date"], avail_start), avail_end)
 
 start = st.sidebar.date_input(
     "Start",
-    value=default_start,
     min_value=avail_start,
     max_value=avail_end,
     key="start_date",
 )
 end = st.sidebar.date_input(
     "End",
-    value=avail_end,
     min_value=avail_start,
     max_value=avail_end,
     key="end_date",
