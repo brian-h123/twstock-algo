@@ -2,8 +2,8 @@
 
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
-**Last updated:** 2026-05-20
-**Current phase:** Phase 2 — Inspection Dashboard (full spec: `PHASE_2.md`)
+**Last updated:** 2026-05-21
+**Current phase:** Phase 3 — Backtesting Engine (Phase 2 complete; see `journal/phase_2_retro.md`)
 
 ---
 
@@ -167,8 +167,9 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 **Done:**
 - Phase 0 — Foundation (closed 2026-05-11)
 - Phase 1 — Data Pipeline (closed 2026-05-19). All 50 tickers backfilled to `data/by_ticker/`; corporate actions in `data/corporate_actions/`; `quality.check_all()` ok for 50/50; adjustment anchors test green at 0.01% tolerance.
+- Phase 2 — Inspection Dashboard (closed 2026-05-21). Streamlit dashboard at `src/twstock/ui/`; candlestick + volume chart, SMA/Bollinger overlays, adjusted/raw toggle, ex-date markers, info panel; 160 tests passing. Retro: `journal/phase_2_retro.md`.
 
-**Active:** Phase 2 — Inspection Dashboard. Full spec: `PHASE_2.md`. 1–2 weeks. Exit criteria in §8 of that doc.
+**Active:** Phase 3 — Backtesting Engine. Full spec: `PHASE_3.md` (to be written at kickoff).
 
 **Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 imports from here only):
 ```python
@@ -181,7 +182,7 @@ from twstock.data.quality import check_ticker, check_all
 from twstock.universe import get_top50_universe, get_listing_dates
 ```
 
-**Build order:** follow `PHASE_2.md` §5 strictly. Scaffold → names → data loader → chart builders → controls → chart wired → toggle → overlays → info panel → markers → perf pass → retro.
+**Build order:** follow `PHASE_3.md` §5 when available. Phase 3 spec to be written at kickoff.
 
 ## 7. Guardrails — DO NOT
 

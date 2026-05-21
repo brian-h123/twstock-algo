@@ -354,7 +354,7 @@ based on what I learned, (2) produce a brief retrospective, and
 |---|---|---|---|---|
 | 0 — Foundation | Done | 2026-05-10 | 2026-05-11 | Repo, tooling, conventions, universe, abstract `DataSource`, journal scaffold all in place |
 | 1 — Data Pipeline | Done | 2026-05-11 | 2026-05-17 | 50/50 tickers backfilled; 111 tests passing; all exit criteria met. Retro: `journal/phase_1_retro.md`. Open: FU-05 (pre-TWSE prices for 6669/7769/6919) must be resolved before Phase 2 starts. |
-| 2 — Dashboard | Pending | — | — | — |
+| 2 — Dashboard | Done | 2026-05-20 | 2026-05-21 | All exit criteria met; 31 new tests (160 total); all 50 tickers render in <2s warm. Retro: `journal/phase_2_retro.md`. |
 | 3 — Backtester | Pending | — | — | — |
 | 4 — Technical strategies | Pending | — | — | — |
 | 5 — Paper sim | Pending | — | — | — |
