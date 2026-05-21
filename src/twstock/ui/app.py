@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import streamlit as st
 
-from twstock.ui.charts import candlestick_volume
+from twstock.ui.charts import candlestick_volume, compute_bollinger, compute_sma
 from twstock.ui.data_loader import get_available_range, load_adjusted, load_raw
 from twstock.ui.names import display_label
 from twstock.universe import get_top50_universe
@@ -58,6 +58,10 @@ def main() -> None:
 
     price_view = st.sidebar.radio("Price view", ["Adjusted", "Raw"], index=0, key="price_view")
 
+    sma_20 = st.sidebar.checkbox(label="SMA(20)", value=True)
+    sma_60 = st.sidebar.checkbox(label="SMA(60)", value=True)
+    bbands = st.sidebar.checkbox(label="Bollinger Bands", value=False)
+
     if price_view == "Adjusted":
         df = load_adjusted(ticker=ticker, start=start, end=end)
     else:
@@ -67,7 +71,17 @@ def main() -> None:
         st.warning("No data available for the selected range.")
         st.stop()
 
-    fig = candlestick_volume(df=df, title=f"{ticker} — {display_label(ticker)}")
+    overlays = {}
+    if sma_20:
+        overlays["SMA(20)"] = compute_sma(close=df["close"], window=20)
+    if sma_60:
+        overlays["SMA(60)"] = compute_sma(close=df["close"], window=60)
+    if bbands:
+        overlays["BB lower"], overlays["BB mid"], overlays["BB upper"] = compute_bollinger(
+            close=df["close"]
+        )
+
+    fig = candlestick_volume(df=df, overlays=overlays, title=f"{display_label(ticker)}")
     st.plotly_chart(fig, width="stretch")
 
 
