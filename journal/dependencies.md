@@ -10,3 +10,5 @@
 | `exchange_calendars` | runtime | Phase 1 | XTAI trading-day calendar for DQ missing-day checks (decision D8) |
 | `pytest-recording` | dev | Phase 1 | VCR cassette tests for source adapters (decision D6); pulls in `vcrpy` |
 | `tqdm` | runtime | Phase 1 | Progress bar for the backfill script |
+| `streamlit` | runtime | Phase 2 | Frontend framework for the inspection dashboard (decision in PROJECT_PLAN.md §2) |
+| `plotly` | runtime | Phase 2 | Candlestick + volume charts with interactive hover (decision in PROJECT_PLAN.md §2) |

@@ -10,9 +10,11 @@ dependencies = [
     "exchange-calendars>=4.13.2",
     "pandas",
     "pandera",
+    "plotly>=6.7.0",
     "pyarrow",
     "python-dotenv",
     "requests",
+    "streamlit>=1.57.0",
     "tqdm>=4.67.3",
 ]
 

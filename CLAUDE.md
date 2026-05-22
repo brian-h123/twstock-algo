@@ -2,8 +2,8 @@
 
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
-**Last updated:** 2026-05-13
-**Current phase:** Phase 1 — Data Pipeline (full spec: `PHASE_1.md`)
+**Last updated:** 2026-05-21
+**Current phase:** Phase 3 — Backtesting Engine (Phase 2 complete; see `journal/phase_2_retro.md`)
 
 ---
 
@@ -51,7 +51,7 @@ These were decided in the planning workspace and should not be changed without a
 | Broker (live) | Fubon Neo API (Phase 8+); Sinopac/Shioaji as backup |
 | License | MIT |
 
-Phase-specific decisions (test fixture strategy, backfill script ergonomics, etc.) live in the relevant `PHASE_N.md` and per-ADR files in `journal/decisions/`.
+Phase-specific decisions (test fixture strategy, backfill script ergonomics, dashboard layout, etc.) live in the relevant `PHASE_N.md` and per-ADR files in `journal/decisions/`.
 
 ## 3. Code Conventions
 
@@ -61,6 +61,7 @@ Phase-specific decisions (test fixture strategy, backfill script ergonomics, etc
 - All market-data file I/O goes through `src/twstock/data/storage.py`. Do not read or write Parquet directly anywhere else.
 - All external data fetching goes through a `DataSource` implementation in `src/twstock/data/sources/`. New sources must implement the interface in `base.py`.
 - All DataFrames crossing a source or storage boundary must validate against a pandera schema in `src/twstock/data/schemas.py`.
+- **`src/twstock/ui/` is a presentation-only module.** It may import from `twstock.data.api`, `twstock.data.storage`, `twstock.universe`, and third-party libraries (streamlit, plotly, pandas). It must not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or any future strategy/backtest module. The boundary keeps the dashboard a thin layer over the data API. Enforced by code review for Phase 2; an `import-linter` config is a Phase 8 ticket.
 - Configuration constants live in `src/twstock/config.py`. Do not hard-code paths, magic numbers, or universe lists elsewhere.
 - Secrets (API tokens, broker credentials, certificates) are read from environment variables. They never enter the repo. `.env.example` is the only env file in version control.
 - Prefer pure functions where possible; isolate side effects (network, disk, broker calls) at the edges. Adjustment math, DQ checks, and feature engineering must be pure.
@@ -75,7 +76,8 @@ twstock-algo/
 ├── CLAUDE.md                    ← this file (current operational state)
 ├── PROJECT_PLAN.md              ← strategic intent (source of truth for "what")
 ├── PHASE_0.md                   ← Phase 0 spec (done)
-├── PHASE_1.md                   ← Phase 1 spec (active)
+├── PHASE_1.md                   ← Phase 1 spec (done)
+├── PHASE_2.md                   ← Phase 2 spec (active)
 ├── LICENSE                      ← MIT
 ├── pyproject.toml
 ├── .python-version
@@ -93,21 +95,27 @@ twstock-algo/
 │   │   │   ├── base.py
 │   │   │   ├── finmind.py
 │   │   │   └── twse.py
-│   │   ├── schemas.py           ← Phase 1
+│   │   ├── schemas.py
 │   │   ├── storage.py
-│   │   ├── adjustments.py       ← Phase 1
-│   │   ├── quality.py           ← Phase 1
-│   │   └── api.py               ← Phase 1 (public entry point)
-│   ├── indicators/              ← Phase 2/4
+│   │   ├── adjustments.py
+│   │   ├── quality.py
+│   │   └── api.py               ← public entry point for all downstream phases
+│   ├── ui/                      ← Phase 2 — Streamlit dashboard
+│   │   ├── __init__.py
+│   │   ├── app.py
+│   │   ├── data_loader.py
+│   │   ├── charts.py
+│   │   └── names.py
+│   ├── indicators/              ← Phase 3/4
 │   ├── backtest/                ← Phase 3
 │   ├── strategies/              ← Phase 4
-│   ├── broker/                  ← Phase 5
-│   └── ui/                      ← Phase 2
+│   └── broker/                  ← Phase 5
 ├── notebooks/
 ├── tests/
 │   ├── fixtures/                ← hand-written test data (Phase 1+)
 │   ├── cassettes/               ← VCR cassettes for source tests (Phase 1+)
 │   ├── data/                    ← unit tests for data layer
+│   ├── ui/                      ← Phase 2 unit tests
 │   └── integration/             ← @pytest.mark.integration (Phase 1+)
 ├── data/                        ← gitignored; Parquet store
 ├── logs/                        ← gitignored; backfill run logs (JSONL)
@@ -119,6 +127,7 @@ twstock-algo/
 └── scripts/
     └── backfill.py              ← Phase 1
     └── build_anchors.py         ← Phase 1 (regenerate adjustment cross-check fixture)
+    └── fetch_listing_dates.py   ← Phase 1 (one-off TWSE listing-date refresh)
 ```
 
 ## 5. Data Source Contract
@@ -155,23 +164,25 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 
 ## 6. Current State
 
-**Done:** Phase 0 — Foundation (closed 2026-05-11). Repo, tooling, conventions, hard-coded universe, abstract `DataSource`, journal structure all in place.
+**Done:**
+- Phase 0 — Foundation (closed 2026-05-11)
+- Phase 1 — Data Pipeline (closed 2026-05-19). All 50 tickers backfilled to `data/by_ticker/`; corporate actions in `data/corporate_actions/`; `quality.check_all()` ok for 50/50; adjustment anchors test green at 0.01% tolerance.
+- Phase 2 — Inspection Dashboard (closed 2026-05-21). Streamlit dashboard at `src/twstock/ui/`; candlestick + volume chart, SMA/Bollinger overlays, adjusted/raw toggle, ex-date markers, info panel; 160 tests passing. Retro: `journal/phase_2_retro.md`.
 
-**Active:** Phase 1 — Data Pipeline. Full spec in `PHASE_1.md`. ~2 weeks. Exit criteria are listed in §9 of that doc.
+**Active:** Phase 3 — Backtesting Engine. Full spec: `PHASE_3.md` (to be written at kickoff).
 
-**Mid-phase amendment (2026-05-13):** Decision D9 was superseded. The
-adjustment cross-validation method changed from a Yahoo Finance CSV
-fixture (Yahoo paywalled bulk downloads; Stooq does not cover TWSE) to
-a hand-curated anchor fixture at `tests/fixtures/anchor_dividends.json`,
-built from TSMC SEC 6-K filings (dividend amounts) plus TWSE's official
-STOCK_DAY endpoint (raw close prices). The test is now a local-invariant
-ratio assertion rather than a bulk-row comparison. Full rationale in
-`journal/decisions/2026-05-13-adjustment-cross-check-method.md`; spec
-changes in `PHASE_1.md` D9 and §4.6.
+**Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 imports from here only):
+```python
+from twstock.data.api import get_adjusted_history, get_universe
+from twstock.data.storage import (
+    read_ohlcv, read_corporate_actions, query,
+    list_stored_tickers, get_ticker_date_range,
+)
+from twstock.data.quality import check_ticker, check_all
+from twstock.universe import get_top50_universe, get_listing_dates
+```
 
-**Day 1 task before any production code:** the FinMind corporate-actions spike (`PHASE_1.md` §8). The spike findings are recorded in `journal/decisions/` before any of the modules in `PHASE_1.md` §3 get implemented.
-
-**Build order:** follow `PHASE_1.md` §5 strictly. Schemas first, then storage, then adjustments, then sources, then quality/api, then the backfill script.
+**Build order:** follow `PHASE_3.md` §5 when available. Phase 3 spec to be written at kickoff.
 
 ## 7. Guardrails — DO NOT
 
@@ -179,7 +190,9 @@ changes in `PHASE_1.md` D9 and §4.6.
 - Do not write strategies before the backtester is operational. Phases run in order: 1 → 2 → 3 → 4 → ...
 - Do not bypass the `DataSource` interface to fetch market data ad-hoc.
 - Do not read or write Parquet outside of `storage.py`.
-- Do not regenerate `tests/fixtures/anchor_dividends.json` from CI, pre-commit, or test setup. The committed JSON is the source of truth at test time. Regenerate only by running `scripts/build_anchors.py` deliberately, and only when the dividend reference table inside that script has been edited (e.g. adding a new ticker or correcting a source citation). Any regeneration must be reviewed in a commit diff alongside the dividend-table edit that justified it.
+- **Do not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or any strategy/backtest module into `src/twstock/ui/`.** The dashboard is a thin layer over `twstock.data.api`, `twstock.data.storage`, and `twstock.universe`. Mechanical enforcement (`import-linter`) is a Phase 8 ticket; reviewed by hand until then.
+- Do not extract `compute_sma` / `compute_bollinger` from `src/twstock/ui/charts.py` into a shared module during Phase 2. They are intentionally throwaway; Phase 3 builds the indicator module from scratch. Decision recorded in the Phase 2 ADR.
+- Do not regenerate `tests/fixtures/anchor_dividends.json` from CI, pre-commit, or test setup. The committed JSON is the source of truth at test time. Regenerate only by running `scripts/build_anchors.py` deliberately, and only when the dividend reference table inside that script has been edited. Any regeneration must be reviewed in a commit diff alongside the dividend-table edit that justified it.
 - Do not auto-re-record VCR cassettes in CI or pre-commit. Re-record manually and review the diff.
 - Do not commit `.env`, anything in `data/`, anything in `logs/`, broker certificates, or anything in `secrets/`.
 - Do not delete or rewrite past journal entries; append corrections in a new entry.
@@ -195,7 +208,121 @@ changes in `PHASE_1.md` D9 and §4.6.
 
 When starting a session, read the current week's file to pick up context. When ending a session, append tomorrow's dated stub with the *Next* section filled in.
 
-## 9. Useful Commands
+## 9. Commit Convention
+
+This repository will be public. Commits should be readable and quickly understandable by a stranger six months from now. All commits made during a Claude Code session follow this convention. **Claude Code drafts every commit message; the human reviews and approves before the commit lands.**
+
+### 9.1 Format
+
+```
+<type>(<scope>): <subject>
+
+<body — optional, bullets when multi-part>
+
+<footer — Co-Authored-By trailer>
+```
+
+**Header** — required, ≤72 characters.
+
+- **`type`** — one of:
+  - `feat` — new user-facing capability or module
+  - `fix` — bug fix (incorrect behavior, not just bad code)
+  - `refactor` — behavior-preserving reorganization
+  - `perf` — performance improvement, no functional change
+  - `test` — tests only
+  - `docs` — README, CLAUDE.md, journal, ADRs, comments, docstrings
+  - `chore` — tooling, dependencies, build config, gitignore; nothing in `src/` runtime
+- **`scope`** — module or area touched, lowercase, matches the directory name when possible: `data`, `ui`, `storage`, `finmind`, `twse`, `backfill`, `quality`, `adjustments`, `api`, `universe`, `charts`, `names`. Omit only for genuinely cross-cutting commits (`chore: bump pyarrow`).
+- **`subject`** — imperative mood ("add", not "adds" or "added"), lowercase first word, no trailing period. Describes the *outcome*, not the activity.
+
+**Body** — required when the change has multiple distinct parts or when the *why* is not obvious from the header.
+
+- Blank line after header.
+- Bullet form using `-` markers. Never paragraph form for multi-point commits. Single-point commits may use a short paragraph instead of bullets.
+- Wrap at 72 characters.
+- Imperative mood, same as subject.
+- Each bullet 1–3 lines. Explain *what* and *why*. The diff already shows *how*.
+- Refer to code by symbol name (`_build_dividends`, `OHLCV_SCHEMA`, `candlestick_volume`), not by file path or line number.
+- **No phase or day references in commit messages.** Public-repo readers don't know what "Phase 1 Day 6" means. Use the scope and a descriptive subject instead.
+- Breaking changes: prefix the relevant bullet with `BREAKING CHANGE:`.
+
+**Footer** — blank line before.
+
+- `Co-Authored-By: Claude <noreply@anthropic.com>` on every Claude-originated commit, regardless of size or type. No model version, no other variant.
+- Optional: `Closes #N` once issue tracking is in use.
+
+### 9.2 Examples
+
+Single-purpose, no body needed:
+```
+fix(quality): clamp missing-day check to ticker listing date
+chore: bump pandera to 0.20.4
+docs: add commit convention to CLAUDE.md
+test(adjustments): add anchor for Yageo 2022 capital reduction
+```
+
+Multi-part, bulleted body:
+```
+feat(finmind): switch to TaiwanStockDividend with multi-row emission
+
+- Replace TaiwanStockDividendResult with TaiwanStockDividend as the
+  primary dividend dataset; exposes four-component breakdown and
+  per-leg ex-dates
+- Rewrite _build_dividends to iterate raw rows and emit 1–3 output
+  rows per source row depending on has_cash/has_stock/has_rights
+- Derive rights dilution from share counts rather than
+  CashIncreaseSubscriptionRate (post-carve-out rate, not total)
+- Rename _build_reductions -> _build_capital_reductions
+- Re-record VCR cassette against the live endpoint
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+### 9.3 Anti-patterns (treat as automatic rejects during review)
+
+- Defaulting everything to `feat:` regardless of the actual change type.
+- Phase or day references in the subject (`"Phase 1 Day 6 — ..."`).
+- Mixing paragraph and bullet body styles within the same repo.
+- Past tense (`"added"`, `"fixed"`).
+- Vague subjects: `"update code"`, `"fix stuff"`, `"WIP"`, `"Final fix"`.
+- Naming a model version in the trailer (`Claude Sonnet 4.6`, `Claude Opus 4.7`). The canonical form is `Claude <noreply@anthropic.com>`. The model identity is not part of the project history.
+- Two unrelated changes in one commit. Split them.
+
+### 9.4 Commit checkpoints — when to prompt
+
+Claude Code proactively offers to commit at these moments. Each is a hard trigger; do not wait to be asked.
+
+| Trigger | Why |
+|---|---|
+| A step in `PHASE_N.md §5 Build sequence` is complete and tests pass | One commit per step is the unit of progress for the phase |
+| A journal entry is appended (`journal/weekly/<YYYY-WNN>.md` or `journal/decisions/`) | Journal commits are part of the record; don't let them sit uncommitted |
+| `CLAUDE.md`, `PROJECT_PLAN.md`, or any `PHASE_N.md` is edited | Spec changes belong in their own commit, separate from code |
+| A test suite turns from red to green | The fix is a discrete unit; commit before moving on |
+| A `chore:`-class change is complete (dep added, config edited) | Don't let tooling churn pile up with code changes |
+| Before ending a session if `git status` shows uncommitted changes | Don't leave the workspace dirty across sessions |
+
+Claude Code does **not** prompt to commit during these:
+
+- Mid-step work, exploration, or partial edits.
+- A test is failing — fix or revert first, never commit a known-broken state.
+- The change is incomplete and would orphan a half-written function or module.
+
+### 9.5 Commit protocol
+
+When a checkpoint fires, Claude Code:
+
+1. Runs `git status` and reports the modified file list.
+2. Drafts a commit message following §9.1, including the Co-Authored-By trailer.
+3. Shows the message and asks for approval. Acceptable forms: `y` to commit as drafted, `n` to skip, or a revised message.
+4. On approval, runs the pre-commit hooks. If they fail, surfaces the failure and does not commit until the human says how to proceed.
+5. On hook success, runs `git add` for the relevant files and `git commit`. Does not use `git add -A` reflexively — only stages files the human has acknowledged.
+6. Confirms the commit hash and short subject after execution.
+
+If `git status` shows changes that span multiple logical units (e.g., a code change and an unrelated journal entry and a CLAUDE.md edit), Claude Code proposes splitting into multiple commits and drafts each one in turn.
+
+Claude Code **never** commits without explicit human approval, and never silently amends or force-pushes.
+
+## 10. Useful Commands
 
 ```bash
 # Setup
@@ -223,6 +350,6 @@ uv run python scripts/backfill.py --tickers 2330 --force   # re-fetch existing
 # (run only after editing the dividend reference table inside the script)
 uv run python scripts/build_anchors.py
 
-# Streamlit (Phase 2+)
+# Phase 2 — inspection dashboard
 uv run streamlit run src/twstock/ui/app.py
 ```
