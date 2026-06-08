@@ -11,11 +11,14 @@ def _validate(close: pd.Series) -> None:
 
 
 def sma(close: pd.Series, window: int) -> pd.Series:
+    """Simple moving average. Value at index T uses close[T-window+1:T+1]."""
     _validate(close)
     return close.rolling(window, min_periods=window).mean()
 
 
 def ema(close: pd.Series, window: int) -> pd.Series:
+    """Exponential moving average using pandas' adjust=False convention
+    (matches standard trading-platform definition)."""
     _validate(close)
     return close.ewm(span=window, adjust=False, min_periods=window).mean()
 
@@ -23,6 +26,8 @@ def ema(close: pd.Series, window: int) -> pd.Series:
 def bollinger_bands(
     close: pd.Series, window: int = 20, k: float = 2.0
 ) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Returns (lower, middle, upper). Middle = sma(close, window).
+    Bands at middle ± k * rolling_std(window, ddof=0)."""
     _validate(close)
     middle = sma(close=close, window=window)
     std = close.rolling(window, min_periods=window).std(ddof=0)
@@ -32,6 +37,7 @@ def bollinger_bands(
 
 
 def rsi(close: pd.Series, window: int = 14) -> pd.Series:
+    """Wilder's RSI. Returns values in [0, 100], NaN for the first `window` rows."""
     _validate(close)
     delta = close.diff()
     gains = delta.clip(lower=0)
