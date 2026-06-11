@@ -130,7 +130,7 @@ def write_log(log_path: Path, record: dict) -> None:
 
 
 def main(args: argparse.Namespace) -> None:
-    tickers = args.tickers.split(",") if args.tickers else get_universe()
+    tickers = args.tickers.split(",") if args.tickers else [*get_universe(), "0050"]
     start = args.start or date.today() - timedelta(days=365 * 10)
     end = args.end or date.today()
     throttle_s = args.throttle_ms / 1000
