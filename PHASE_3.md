@@ -176,7 +176,7 @@ class BuyAndHold(Strategy):
     hold until end. Used for the 0050 benchmark and as a smoke test."""
 
     def generate_signals(self, bars: pd.DataFrame) -> pd.Series:
-        signals = pd.Series(0, index=bars.index, dtype=int)
+        signals = pd.Series(dtype=float, index=bars.index)  # all NaN = preserve state
         signals.iloc[0] = 1
         return signals
 ```
@@ -184,6 +184,7 @@ class BuyAndHold(Strategy):
 Implementation notes:
 - **Single-ticker scope for v1.** `generate_signals` takes one ticker's bars and returns one Series. Multi-asset / portfolio strategies (e.g. top-N momentum across the universe) are a Phase 4 extension; the engine loop handles per-ticker invocation for v1.
 - **Signal semantics in v1:** +1 = full long position (size determined by engine's `max_position_pct`); 0 = flat; -1 = short (raised to the engine but for v1 the engine rejects short orders unless `allow_short=True`). NaN = preserve previous state. Position changes are state transitions; the engine diffs successive signals to derive orders.
+- **`0` and `NaN` are not interchangeable.** `0` is an instruction — "go flat; close this position." `NaN` is silence — "I have no opinion; leave the position alone." A `BuyAndHold` that emits `[1, 0, 0, …]` would enter at bar 0 and immediately sell at bar 2's open, because the engine sees a long→flat transition at bar 1. The correct implementation emits `[1, NaN, NaN, …]`: enter once, then hands off.
 - **Long-only by default.** Engine constructor takes `allow_short: bool = False`. Short signals on a long-only engine become 0 with a warning logged once.
 
 ### 4.3 `backtest/cost_model.py`
@@ -588,7 +589,7 @@ Phase 2 ended at 160 tests in 3.6 seconds. Phase 3 adds ~50–70 unit tests plus
 | File | What it covers |
 |---|---|
 | `test_core.py` | Each indicator against a hand-computed reference Series on 30 rows. NaN warmup. Type-error rejection. Bollinger middle band exactly equals `sma`. RSI bounded in [0, 100]. |
-| `test_strategy.py` | `BuyAndHold` returns 1 at index 0 and 0 elsewhere. Strategy subclass without `generate_signals` raises `TypeError` at instantiation (ABC enforcement). |
+| `test_strategy.py` | `BuyAndHold` returns 1 at index 0 and NaN for all subsequent bars. Strategy subclass without `generate_signals` raises `TypeError` at instantiation (ABC enforcement). |
 | `test_cost_model.py` | Stock sell tax = 0.3% exactly; ETF sell tax = 0.1% for 0050; commission applied both sides; slippage applied in the worse direction; no tax on buys. |
 | `test_portfolio.py` | Buy + sell sequence yields expected cash and equity. Insufficient cash raises `InsufficientCashError`. Mark-to-market with mixed positions. Selling shares not held raises. |
 | `test_engine.py` | 20-row synthetic bars + deterministic signals produce the expected trades, fills at T+1 opens, equity curve shape. Empty / short-history tickers handled without crash. |
@@ -670,6 +671,12 @@ At the last bar of the backtest, there is no T+1. Open positions must be closed.
 3. Don't close — report unrealized P&L separately.
 
 We choose option 1: force-close at the last bar's open, applying full costs. Open positions on the final bar contribute their entry-to-final-open P&L. The tear sheet labels this clearly. This is the only place same-bar execution would have been tempting, and we explicitly avoid it.
+
+**Pending orders are dropped on the final day, not executed.** If a signal at T-1 scheduled a buy for T and T turns out to be the last bar, that buy order is cleared without executing before the force-close runs. The alternative — execute the buy then immediately force-close at the same open — would be economically meaningless (net zero position change, double cost) and misleading in the trade ledger. Dropping pending orders on the final day is the correct choice.
+
+**Stale orders for non-trading tickers are also dropped.** If a pending order from T-1 cannot be filled at T's open because the ticker has no data on T (suspended trading, holiday gap, etc.), the order is dropped rather than carried forward to T+1. Carrying stale orders risks filling at a price the signal never intended. Dropping is safe because: (a) the signal already moved `last_signal` to the new state, and (b) if the signal is still valid at T+1, the strategy will re-issue it at that bar's signal read. For the TWSE Top 50, suspension gaps are rare in practice.
+
+**Tickers with no open price on the last day are not force-closed.** Their positions remain, mark-to-market uses the most recent stale close price from `last_close`, and the unrealized P&L is included in `final_equity`. This is a known limitation; Phase 5's paper-sim will handle it explicitly with exchange calendar lookups.
 
 ### 7.6 Cost-model symmetry
 
