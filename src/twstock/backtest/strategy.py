@@ -33,6 +33,6 @@ class BuyAndHold(Strategy):
     hold until end. Used for the 0050 benchmark and as a smoke test."""
 
     def generate_signals(self, bars: pd.DataFrame) -> pd.Series:
-        signals = pd.Series(0, index=bars.index, dtype=int)
+        signals = pd.Series(dtype=float, index=bars.index)  # all NaN = preserve state
         signals.iloc[0] = 1
         return signals

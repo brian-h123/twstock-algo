@@ -24,10 +24,10 @@ def test_buy_and_hold_signal_at_bar_zero():
     assert signals.iloc[0] == 1
 
 
-def test_buy_and_hold_all_other_bars_zero():
+def test_buy_and_hold_all_other_bars_nan():
     bars = _make_bars(10)
     signals = BuyAndHold().generate_signals(bars)
-    assert (signals.iloc[1:] == 0).all()
+    assert signals.iloc[1:].isna().all()
 
 
 def test_buy_and_hold_index_matches_bars():
