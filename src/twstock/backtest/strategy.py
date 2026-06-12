@@ -17,6 +17,24 @@ class Strategy(ABC):
         target positions in {-1, 0, +1} indexed by the same dates.
         NaN means 'no signal — preserve previous state'.
 
+        Two valid signal idioms exist; choose based on strategy shape:
+
+        **Trigger-based** (e.g. BuyAndHold): emit a non-NaN value only
+        when the desired position *changes*. All other bars are NaN,
+        which tells the engine to hold whatever position it already has.
+        Example: [1, NaN, NaN, NaN, 0, NaN, ...] — enter once, exit once.
+
+        **State-based** (e.g. SmaCrossover): emit a non-NaN value on
+        *every* bar after the indicator warmup period; consecutive
+        identical values (e.g. [1, 1, 1]) are no-ops in the engine
+        because it only acts on transitions. Emit NaN explicitly during
+        the warmup period (before the indicator has enough history),
+        rather than relying on 0 (which means "go flat") as a proxy.
+
+        Both idioms are semantically equivalent to the engine. The rule
+        of thumb: use trigger-based for event-driven entries; use
+        state-based for continuous indicator comparisons.
+
         Implementations must use only causal operations. Any use of
         bars.iloc[T+k] for k > 0 to compute signal[T] is lookahead bias.
         """

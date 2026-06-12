@@ -25,9 +25,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.backtest.conftest import make_synthetic_bars
+from twstock.backtest.audit import assert_no_lookahead
 from twstock.backtest.cost_model import TaiwanCostModel
 from twstock.backtest.engine import Engine
 from twstock.backtest.strategy import BuyAndHold, Strategy
+from twstock.strategies.sma_crossover import SmaCrossover
 
 # Patch target: engine imports get_adjusted_history directly into its namespace.
 _PATCH = "twstock.backtest.engine.get_adjusted_history"
@@ -550,3 +553,46 @@ def test_two_ticker_run_produces_independent_round_trips(
     sell_tickers = set(result.trades[result.trades["side"] == "sell"]["ticker"])
     assert buy_tickers == {"AAAA", "BBBB"}
     assert sell_tickers == {"AAAA", "BBBB"}
+
+
+# ─── SmaCrossover integration ─────────────────────────────────────────────────
+
+
+def test_sma_crossover_net_return_below_gross(engine: Engine) -> None:
+    """Net equity after costs must be less than gross equity (pre-cost).
+
+    Uses a monotonically rising price series (vol=0) so SMA(20) > SMA(60)
+    is guaranteed after the slow-MA warmup, producing at least one round
+    trip. Gross equity is reconstructed by adding all cost components back.
+    """
+    bars = make_synthetic_bars(252, trend=0.3, vol=0.0)
+
+    with patch(_PATCH, return_value=bars):
+        result = engine.run(
+            strategy=SmaCrossover(fast=20, slow=60),
+            tickers=["2330"],
+            start=date(2020, 1, 1),
+            end=date(2020, 12, 31),
+        )
+
+    assert len(result.trades) >= 2, "expected at least one buy and one force-close sell"
+    assert result.total_commission > 0
+    assert result.total_tax > 0
+
+    gross_equity = (
+        result.final_equity
+        + result.total_commission
+        + result.total_tax
+        + result.total_slippage_cost
+    )
+    assert result.final_equity < gross_equity
+
+
+def test_sma_crossover_passes_lookahead_audit() -> None:
+    """SmaCrossover must pass assert_no_lookahead on a 252-bar sample.
+
+    Perturbs the last 50 bars and verifies the first 202 signals are
+    unchanged — confirming no signal depends on future data.
+    """
+    bars = make_synthetic_bars(252, trend=0.3, vol=0.0)
+    assert_no_lookahead(SmaCrossover(fast=20, slow=60), bars)
