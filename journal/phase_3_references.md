@@ -1,10 +1,10 @@
 # Phase 3 — Backtester Reference Study
 
-> **Status: draft.** Block 0 of the Phase 3 build sequence — targeted reading of
-> backtrader and vectorbt source as architectural references. No engine code is
-> written yet. Finalized at step 15 with retrospective notes: which engine
-> choices were actually informed by what we read here, vs. what these notes only
-> predicted.
+> **Status: final.** Step 0 of the Phase 3 build sequence was targeted reading
+> of backtrader and vectorbt source as architectural references. Step 15 (this
+> update) adds the retrospective: which engine choices were directly shaped by
+> what we read, which backtrader pieces to revisit in Phase 5, and what from
+> vectorbt turned out not to matter.
 
 ## Why we read these libraries
 
@@ -360,3 +360,189 @@ Deferred items noticed while reading, mostly Phase 5+:
    a `Sizer`. Our max-10%-per-position rule is a single constraint — lean inline
    for Phase 3, extract only if Phase 4 needs varied sizing schemes. Additive
    either way.
+
+---
+
+# Retrospective — what actually happened (added at step 15)
+
+*Written after the engine was fully built (steps 2–14 complete, all exit criteria
+green). The test below is: did the draft notes predict what mattered, or were
+they post-hoc rationalization? Answer: mostly predictive; a few items turned out
+simpler or not needed at this scale.*
+
+## Design choices directly shaped by this reading
+
+**`pending_orders` dict as the T→T+1 boundary.**
+The most load-bearing engine insight came from `bbroker.py`: `buy()`/`sell()` do
+not fill — they queue. `broker.next()` fills. Translating that into our stateless
+engine produced the `pending_orders: dict[str, str]` pattern — orders scheduled
+at the signal bar, consumed at the next bar's open. The code reads exactly like
+the borrow description predicted; nothing had to be rethought during
+implementation.
+
+**Sortino downside-deviation convention.**
+`nb.py`'s Sortino formula is the one formulation that implementations genuinely
+disagree on. Verifying it from source resolved the ambiguity before it became a
+bug: mask positives → compute mean of squared negatives over **all** periods →
+take sqrt. The `tearsheet.py` implementation matches, and the code comment
+(`# downside_dev averages over ALL n periods — borrow #10`) points directly back
+here. Without having pinned the convention explicitly in the reference study,
+we'd have had to reverse-engineer it from test failures.
+
+**`_ANN_FACTOR = 252` as committed policy, not a parameter.**
+vectorbt's multi-frequency `ann_factor = year_freq / freq` was studied precisely
+to justify *why* we don't need it. The tearsheet commits `_ANN_FACTOR = 252` as
+a module-level constant with a comment pointing to borrow #14. The right framing
+— "single-purpose committed policy" vs "general-purpose parameter for a library
+that can't assume frequency" — was clearest after seeing the vectorbt code.
+
+**Stateless strategy + perturbation audit.**
+The architectural decision that `generate_signals` must be a pure function of
+`bars` (no mutable instance state) was not obvious from first principles — it's
+easy to imagine a strategy that accumulates a position buffer across bars. Seeing
+backtrader's stateful callback strategy (§`strategy.py`) and tracing *why* that
+makes `assert_no_lookahead`-style verification impossible (you can't just
+re-run the function with a perturbed copy if the function has external state)
+crystallized the constraint. The note "reversing voids the audit" (Reject #7)
+is precisely why `audit.py`'s perturbation approach is coherent: it only works
+on a pure function.
+
+**`max_drawdown_duration_days` added to the tear sheet.**
+`stats_defaults` from vectorbt surfaced `max_dd_duration` as a standard metric
+we had not originally spec'd. It's in the tear sheet (`max_drawdown_duration_days`)
+because the reference study called it out (Borrow #9); without the reading it
+would have been a Phase 4 addition.
+
+**Cost at fill, strategy cost-blind.**
+The `TaiwanCostModel` is called inside `Portfolio.buy()` / `Portfolio.sell()`,
+not by the strategy or the engine loop. This placement — cost computed at the
+fill boundary, never visible to the strategy — was a direct borrow from
+`comminfo.py`'s `_getcommission` call inside `_execute`. It's a small point but
+the right seam: the strategy can't accidentally branch on cost information it
+shouldn't have.
+
+## What turned out simpler than the notes predicted
+
+**The `opened`/`closed` fill decomposition (Borrow #5).**
+`position.py`'s `opened + closed == size` decomposition handles the reversal
+case (long→short in one fill). We don't need it. Phase 3 is long-only, fills are
+atomic, and round-trip P&L is computed in `_round_trips()` by pairing sorted buy
+and sell records — a simpler calculation that doesn't need per-fill direction
+tracking. The Phase 5 partial-fills case *will* need the decomposition; the notes
+are correct that it's prep material, not current use.
+
+**The order state machine (9 states across 4 dimensions).**
+`order.py`'s `Created → Submitted → Accepted → Partial → Completed / Canceled /
+Expired / Margin / Rejected` lifecycle exists because backtrader must handle live
+broker acknowledgement latency, rejections, and partial fills. Our engine needs
+none of it: `pending_orders` is a `dict[str, Literal["buy", "sell"]]`. Two
+states (`pending` vs `not pending`), zero transition tracking. The notes correctly
+flagged the shape of backtrader's model as Phase 5 prep (Borrow #6); the Phase 3
+engine happily ignores all of it.
+
+**Sizer: stayed inline, exactly as predicted (Future #8).**
+Position size is computed with three lines in the engine loop:
+`target_amount = portfolio.equity * self._max_position_pct`,
+`spendable = min(target_amount, portfolio.cash)`,
+`shares = math.floor(spendable / open_prices[ticker])`.
+Extracting a `Sizer` object would have been premature.
+
+**Range-capping slippage (Future #2).**
+bbroker.py clamps slippage to the bar's high/low so a slipped fill price can't
+exceed the bar range. We don't implement this. At 5 bps per side on TWSE Top-50
+names, slippage is a rounding-error against the bar range, and the simplification
+doesn't affect any result in the test suite. Revisit only if slippage grows or
+the universe expands to less-liquid names.
+
+## What from vectorbt turned out not to matter
+
+**The vectorized signal pipeline (`signals/factory.py`).**
+The whole `Entry`/`Exit` boolean-array infrastructure exists to feed
+`Portfolio.from_signals` in one pass. We don't have a vectorized portfolio.
+Reading it confirmed there was nothing to borrow architecturally — it's a
+consequence of vectorbt's all-at-once execution model, which we rejected. The
+notes correctly marked it "confirm-only" (see `signals/factory.py` observation).
+
+**Numba primitives (`expanding_max_1d_nb`, `cum_returns_1d_nb`).**
+Understood immediately as a Numba compatibility tax. pandas' `.cummax()` and
+`.pct_change()` do exactly the same thing with less code. Rejecting Numba at the
+dependency level made these irrelevant; noting *why* they exist prevents cargo-
+culting them later.
+
+**Multi-frequency annualization.**
+The full `ann_factor = year_freq / freq` machinery in
+`returns/accessors.py` exists because vectorbt supports minute, hour, day, and
+week bars. We have one frequency, one factor, one line. The reading was useful
+only to confirm we were right to commit the constant.
+
+**`expectancy` metric.**
+vectorbt's `stats_defaults` includes `expectancy = avg_win × hit_rate − avg_loss
+× (1 − hit_rate)` — the expected value per trade. It was listed as a Borrow #9
+candidate but didn't make the final `tear_sheet()`. The metric is meaningful but
+adds nothing to Phase 3's SMA crossover evaluation that `avg_win`, `avg_loss`,
+and `hit_rate` don't already supply. Candidate for Phase 4 when comparing
+multiple strategies.
+
+**`deflated_sharpe_ratio` (Future #7).**
+Still deferred. Correct for Phase 4's multi-strategy comparison where
+multiple-testing bias is the concern. Not relevant for a single-strategy
+validation run.
+
+## backtrader pieces to revisit in Phase 5
+
+The order-level architecture from `order.py` + `bbroker.py` is the primary Phase
+5 reference:
+
+- **9-state lifecycle, split into transient / terminal.** `Created → Submitted →
+  Accepted → Partial → Completed / Canceled / Expired / Margin / Rejected`.
+  Phase 5's TWSE paper-sim will need a subset of this — likely
+  `Pending → Filled / Rejected / Expired`. The exact Taiwan-broker rejection
+  taxonomy (margin call, price-band violation, circuit breaker, insufficient lot
+  size) is the Phase 5 design decision; backtrader's *shape* is the template.
+
+- **`notify_order` / `notify_trade` reaction hooks.** Phase 5 strategies may want
+  to react to fills (e.g. log a partial fill, adjust a stop). These hooks need
+  to be added to the Strategy ABC without breaking the statelessness invariant —
+  which means they fire after `generate_signals`, not inside it, and they don't
+  mutate the signal-generation path. The backtrader design gets this right
+  (callback, not a signal-path intrusion); the Phase 5 ABC extension should
+  follow the same pattern.
+
+- **Execution bits / partial fills.** `OrderExecutionBit` and the `opened +
+  closed == size` accounting in `position.py` become relevant when the paper-sim
+  routes orders through a real book. The bbroker.py read is the primary reference
+  for how to decompose a fill into exposure-increasing and exposure-reducing
+  components and compute realized P&L on the `closed` portion only.
+
+- **`BrokerBase` as the sim/live swap-point (Borrow #1).** Not yet materialized —
+  Phase 5 is where `BrokerSimulator` and the Fubon adapter both implement a
+  shared interface. The abstract method set from backtrader's `BrokerBase`
+  (`buy`, `sell`, `cancel`, `getposition`, `getvalue`, `getcash`, `next`) is the
+  right starting menu; prune to what Fubon's API actually supports.
+
+- **Live-feed queue machinery** (`newqcheck`, blocking queue waits,
+  `_datanotify`/`_storenotify`, `_event_stop` in `cerebro.py`). Phase 5 paper-
+  sim is still pulling from static Parquet; Phase 8 live will need a real-time
+  feed queue. The cerebro.py live-mode sections are the reference for how an
+  event loop integrates a blocking data queue without busy-waiting.
+
+## Summary judgment
+
+The reference study was more useful than the usual pre-implementation reading —
+because it was *targeted*. We read `bbroker.py` to understand fill mechanics, not
+to understand every cerebro feature. We read `nb.py` to verify one disputed
+formula, not to understand Numba. The narrowness kept the volume manageable and
+the borrows concrete.
+
+The test of whether pre-code reading pays off is whether it changed any decision
+made during implementation. It changed three:
+
+1. The `pending_orders` pattern (directly from `bbroker.py`'s queue-then-fill
+   split).
+2. The Sortino all-periods denominator (directly from `nb.py`).
+3. Adding `max_drawdown_duration_days` to the tear sheet (from
+   `stats_defaults`).
+
+Everything else was validation — confirming the planned design was consistent with
+what mature libraries do, or confirming a rejection was justified. Validation is
+not waste: it means the Phase 3 spec was well-designed before the code started.
