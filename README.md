@@ -7,7 +7,7 @@ The project incrementally builds a full pipeline:
 data ingestion → inspection dashboard → backtesting engine → technical-indicator strategies →
 paper-trading simulator → ML-based strategies → alternative-data strategies → productionization.
 
-**Current phase:** Phase 3 — Backtesting Engine (Phase 2 complete; see `journal/phase_2_retro.md`)
+**Current phase:** Phase 4 — Technical Strategies (Phase 3 complete; see `journal/phase_3_retro.md`)
 
 ---
 
@@ -53,6 +53,44 @@ uv run streamlit run src/twstock/ui/app.py
 ```
 
 This opens the inspection dashboard at `http://localhost:8501`. Select any Top 50 ticker from the sidebar, adjust the date range, and toggle between adjusted and raw prices to visually verify the Phase 1 adjustment math.
+
+---
+
+## Run a backtest
+
+Requires all 50 tickers (plus 0050) to be backfilled first. Then:
+
+```python
+from datetime import date
+from twstock.backtest import Engine, TaiwanCostModel, BuyAndHold
+from twstock.strategies.sma_crossover import SmaCrossover
+
+engine = Engine(
+    capital=1_000_000,
+    cost_model=TaiwanCostModel(),
+    max_position_pct=0.10,
+    execution="next_open",
+)
+
+result = engine.run(
+    strategy=SmaCrossover(fast=20, slow=60),
+    tickers=["2330"],
+    start=date(2020, 1, 1),
+    end=date(2025, 12, 31),
+)
+
+benchmark = engine.run(
+    strategy=BuyAndHold(),
+    tickers=["0050"],
+    start=date(2020, 1, 1),
+    end=date(2025, 12, 31),
+)
+
+print(result.tear_sheet())
+print(benchmark.tear_sheet())
+```
+
+The cost model is always on: 0.3% sell-side securities transaction tax (0.1% for ETFs), 0.0855% per-side commission, and 5 bps per-side slippage. Net return will be below gross return.
 
 ---
 

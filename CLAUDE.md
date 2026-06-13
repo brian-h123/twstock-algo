@@ -2,8 +2,8 @@
 
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
-**Last updated:** 2026-05-30
-**Current phase:** Phase 3 — Backtesting Engine (Phase 2 complete; see `journal/phase_2_retro.md`)
+**Last updated:** 2026-06-13
+**Current phase:** Phase 4 — Technical Strategies (Phase 3 complete; see `journal/phase_3_retro.md`)
 
 ---
 
@@ -191,7 +191,9 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 - Phase 1 — Data Pipeline (closed 2026-05-19). All 50 tickers backfilled to `data/by_ticker/`; corporate actions in `data/corporate_actions/`; `quality.check_all()` ok for 50/50; adjustment anchors test green at 0.01% tolerance.
 - Phase 2 — Inspection Dashboard (closed 2026-05-21). Streamlit dashboard at `src/twstock/ui/`; candlestick + volume chart, SMA/Bollinger overlays, adjusted/raw toggle, ex-date markers, info panel; 160 tests passing. Retro: `journal/phase_2_retro.md`.
 
-**Active:** Phase 3 — Backtesting Engine. Full spec: `PHASE_3.md`. Build sequence in §5 of that spec. Key locked decisions: custom thin engine (no vectorbt as dep), T+1 open execution, Taiwan-specific cost model always on, `Strategy` ABC for Phase 4/5/6 reuse.
+- Phase 3 — Backtesting Engine (closed 2026-06-13). Custom thin engine; T+1-open execution; Taiwan cost model always on; `Strategy` ABC; `WalkForwardSplit`; SMA crossover reference strategy; tear sheet with full metrics. ~230 tests passing. Retro: `journal/phase_3_retro.md`.
+
+**Active:** Phase 4 — Technical Strategies. Full spec: forthcoming `PHASE_4.md`. Builds on the Phase 3 `Engine`, `Strategy` ABC, and `WalkForwardSplit` to evaluate 5–10 classical strategies with honest out-of-sample tear sheets.
 
 **Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 and Phase 3 import from here only):
 ```python
