@@ -30,6 +30,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--record-mode=none"
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

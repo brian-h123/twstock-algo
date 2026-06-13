@@ -2,8 +2,8 @@
 
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
-**Last updated:** 2026-05-21
-**Current phase:** Phase 3 — Backtesting Engine (Phase 2 complete; see `journal/phase_2_retro.md`)
+**Last updated:** 2026-06-13
+**Current phase:** Phase 4 — Technical Strategies (Phase 3 complete; see `journal/phase_3_retro.md`)
 
 ---
 
@@ -46,12 +46,14 @@ These were decided in the planning workspace and should not be changed without a
 | **Schema validation** | **pandera schemas in `data/schemas.py`; enforced at every source/storage boundary** |
 | **Trading calendar** | **`exchange_calendars` library, XTAI calendar** |
 | Frontend | Streamlit + Plotly |
-| Backtester | vectorbt (final pick deferred to Phase 3 kickoff) |
+| **Backtester** | **Custom thin engine; vectorbt and backtrader studied as architectural references only. See `journal/decisions/0004-custom-backtester-rejecting-vectorbt.md`.** |
+| **Execution model** | **Signal at T close, fill at T+1 open. No same-bar execution.** |
+| **Cost model** | **Taiwan-specific: 0.3% sell-side tax (0.1% for ETFs), 0.0855% per-side commission default (0.1425% statutory cap × 6折), 5 bps per-side slippage. Always on.** |
 | Broker (paper) | Self-built simulator (Phase 5) |
 | Broker (live) | Fubon Neo API (Phase 8+); Sinopac/Shioaji as backup |
 | License | MIT |
 
-Phase-specific decisions (test fixture strategy, backfill script ergonomics, dashboard layout, etc.) live in the relevant `PHASE_N.md` and per-ADR files in `journal/decisions/`.
+Phase-specific decisions (test fixture strategy, backfill script ergonomics, dashboard layout, backtester module decomposition, etc.) live in the relevant `PHASE_N.md` and per-ADR files in `journal/decisions/`.
 
 ## 3. Code Conventions
 
@@ -61,10 +63,12 @@ Phase-specific decisions (test fixture strategy, backfill script ergonomics, das
 - All market-data file I/O goes through `src/twstock/data/storage.py`. Do not read or write Parquet directly anywhere else.
 - All external data fetching goes through a `DataSource` implementation in `src/twstock/data/sources/`. New sources must implement the interface in `base.py`.
 - All DataFrames crossing a source or storage boundary must validate against a pandera schema in `src/twstock/data/schemas.py`.
-- **`src/twstock/ui/` is a presentation-only module.** It may import from `twstock.data.api`, `twstock.data.storage`, `twstock.universe`, and third-party libraries (streamlit, plotly, pandas). It must not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or any future strategy/backtest module. The boundary keeps the dashboard a thin layer over the data API. Enforced by code review for Phase 2; an `import-linter` config is a Phase 8 ticket.
+- **`src/twstock/ui/` is a presentation-only module.** It may import from `twstock.data.api`, `twstock.data.storage`, `twstock.universe`, and third-party libraries (streamlit, plotly, pandas). It must not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or any strategy/backtest module. The boundary keeps the dashboard a thin layer over the data API. Enforced by code review; an `import-linter` config is a Phase 8 ticket.
+- **`src/twstock/backtest/` is the backtesting layer.** It may import from `twstock.data.api`, `twstock.data.storage`, `twstock.universe`, `twstock.indicators`, and `twstock.config`. It must not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or `twstock.ui`. Mirrors the `ui/` boundary rule; enforced by code review.
+- **Lookahead safety is structural.** No indicator, strategy, or feature uses `pd.Series.shift(-k)` for positive `k`. The engine executes orders at T+1's open only; same-bar execution is disallowed in the constructor's `Literal`.
 - Configuration constants live in `src/twstock/config.py`. Do not hard-code paths, magic numbers, or universe lists elsewhere.
 - Secrets (API tokens, broker credentials, certificates) are read from environment variables. They never enter the repo. `.env.example` is the only env file in version control.
-- Prefer pure functions where possible; isolate side effects (network, disk, broker calls) at the edges. Adjustment math, DQ checks, and feature engineering must be pure.
+- Prefer pure functions where possible; isolate side effects (network, disk, broker calls) at the edges. Adjustment math, DQ checks, feature engineering, indicator computation, and tear-sheet metrics must be pure.
 - Use `pathlib.Path`, never raw strings, for filesystem paths.
 - Tests that touch the network are marked `@pytest.mark.integration` and excluded from default runs.
 
@@ -77,7 +81,8 @@ twstock-algo/
 ├── PROJECT_PLAN.md              ← strategic intent (source of truth for "what")
 ├── PHASE_0.md                   ← Phase 0 spec (done)
 ├── PHASE_1.md                   ← Phase 1 spec (done)
-├── PHASE_2.md                   ← Phase 2 spec (active)
+├── PHASE_2.md                   ← Phase 2 spec (done)
+├── PHASE_3.md                   ← Phase 3 spec (active)
 ├── LICENSE                      ← MIT
 ├── pyproject.toml
 ├── .python-version
@@ -106,9 +111,22 @@ twstock-algo/
 │   │   ├── data_loader.py
 │   │   ├── charts.py
 │   │   └── names.py
-│   ├── indicators/              ← Phase 3/4
-│   ├── backtest/                ← Phase 3
-│   ├── strategies/              ← Phase 4
+│   ├── indicators/              ← Phase 3 — pure pandas indicators
+│   │   ├── __init__.py
+│   │   └── core.py              ← sma, ema, bollinger_bands, rsi
+│   ├── backtest/                ← Phase 3 — custom thin engine
+│   │   ├── __init__.py
+│   │   ├── strategy.py          ← Strategy ABC + BuyAndHold
+│   │   ├── cost_model.py        ← TaiwanCostModel
+│   │   ├── portfolio.py         ← Portfolio: positions, cash, equity
+│   │   ├── engine.py            ← Engine: main loop, T+1 execution
+│   │   ├── result.py            ← BacktestResult dataclass
+│   │   ├── tearsheet.py         ← Metrics + Plotly equity curve
+│   │   ├── walkforward.py       ← WalkForwardSplit iterator
+│   │   └── audit.py             ← Lookahead-bias test utility
+│   ├── strategies/              ← Phase 4 begins here; sma_crossover.py seeded in Phase 3
+│   │   ├── __init__.py
+│   │   └── sma_crossover.py     ← reference SMA(20)/SMA(60) crossover
 │   └── broker/                  ← Phase 5
 ├── notebooks/
 ├── tests/
@@ -116,18 +134,22 @@ twstock-algo/
 │   ├── cassettes/               ← VCR cassettes for source tests (Phase 1+)
 │   ├── data/                    ← unit tests for data layer
 │   ├── ui/                      ← Phase 2 unit tests
+│   ├── indicators/              ← Phase 3 unit tests
+│   ├── backtest/                ← Phase 3 unit tests
 │   └── integration/             ← @pytest.mark.integration (Phase 1+)
-├── data/                        ← gitignored; Parquet store
+├── data/                        ← gitignored; Parquet store (includes 0050 benchmark)
 ├── logs/                        ← gitignored; backfill run logs (JSONL)
 ├── journal/
 │   ├── README.md
 │   ├── weekly/
 │   ├── decisions/
+│   ├── phase_3_references.md    ← vectorbt + backtrader study notes (Phase 3)
 │   └── dependencies.md          ← rationale for each new dep
 └── scripts/
-    └── backfill.py              ← Phase 1
-    └── build_anchors.py         ← Phase 1 (regenerate adjustment cross-check fixture)
-    └── fetch_listing_dates.py   ← Phase 1 (one-off TWSE listing-date refresh)
+    ├── backfill.py              ← Phase 1 (Phase 3 backfills 0050 as benchmark)
+    ├── build_anchors.py         ← Phase 1 (regenerate adjustment cross-check fixture)
+    ├── fetch_listing_dates.py   ← Phase 1 (one-off TWSE listing-date refresh)
+    └── phase_3_stability_report.py   ← Phase 3 walk-forward SMA report
 ```
 
 ## 5. Data Source Contract
@@ -169,9 +191,11 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 - Phase 1 — Data Pipeline (closed 2026-05-19). All 50 tickers backfilled to `data/by_ticker/`; corporate actions in `data/corporate_actions/`; `quality.check_all()` ok for 50/50; adjustment anchors test green at 0.01% tolerance.
 - Phase 2 — Inspection Dashboard (closed 2026-05-21). Streamlit dashboard at `src/twstock/ui/`; candlestick + volume chart, SMA/Bollinger overlays, adjusted/raw toggle, ex-date markers, info panel; 160 tests passing. Retro: `journal/phase_2_retro.md`.
 
-**Active:** Phase 3 — Backtesting Engine. Full spec: `PHASE_3.md` (to be written at kickoff).
+- Phase 3 — Backtesting Engine (closed 2026-06-13). Custom thin engine; T+1-open execution; Taiwan cost model always on; `Strategy` ABC; `WalkForwardSplit`; SMA crossover reference strategy; tear sheet with full metrics. ~230 tests passing. Retro: `journal/phase_3_retro.md`.
 
-**Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 imports from here only):
+**Active:** Phase 4 — Technical Strategies. Full spec: forthcoming `PHASE_4.md`. Builds on the Phase 3 `Engine`, `Strategy` ABC, and `WalkForwardSplit` to evaluate 5–10 classical strategies with honest out-of-sample tear sheets.
+
+**Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 and Phase 3 import from here only):
 ```python
 from twstock.data.api import get_adjusted_history, get_universe
 from twstock.data.storage import (
@@ -182,16 +206,34 @@ from twstock.data.quality import check_ticker, check_all
 from twstock.universe import get_top50_universe, get_listing_dates
 ```
 
-**Build order:** follow `PHASE_3.md` §5 when available. Phase 3 spec to be written at kickoff.
+**Phase 3 will expose these new public symbols** for Phase 4+:
+```python
+from twstock.indicators.core import sma, ema, bollinger_bands, rsi
+from twstock.backtest import (
+    Engine, TaiwanCostModel, Portfolio,
+    Strategy, BuyAndHold, BacktestResult,
+    WalkForwardSplit, assert_no_lookahead,
+)
+from twstock.backtest.tearsheet import tear_sheet, equity_curve_figure
+from twstock.strategies.sma_crossover import SmaCrossover
+```
+
+**Build order:** follow `PHASE_3.md §5`.
 
 ## 7. Guardrails — DO NOT
 
 - Do not place orders against a real broker account. All trading code paths through Phase 7 must use the simulator. Live trading is gated on Phase 8 explicit greenlight.
-- Do not write strategies before the backtester is operational. Phases run in order: 1 → 2 → 3 → 4 → ...
+- Do not write strategies beyond the reference SMA crossover before the backtester is operational. Phases run in order: 1 → 2 → 3 → 4 → ...
 - Do not bypass the `DataSource` interface to fetch market data ad-hoc.
 - Do not read or write Parquet outside of `storage.py`.
 - **Do not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or any strategy/backtest module into `src/twstock/ui/`.** The dashboard is a thin layer over `twstock.data.api`, `twstock.data.storage`, and `twstock.universe`. Mechanical enforcement (`import-linter`) is a Phase 8 ticket; reviewed by hand until then.
-- Do not extract `compute_sma` / `compute_bollinger` from `src/twstock/ui/charts.py` into a shared module during Phase 2. They are intentionally throwaway; Phase 3 builds the indicator module from scratch. Decision recorded in the Phase 2 ADR.
+- **Do not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or `twstock.ui` into `src/twstock/backtest/`.** The backtester depends only on the public data API, the indicator module, the universe, and config. Same Phase 8 import-linter ticket covers both boundaries.
+- Do not extract `compute_sma` / `compute_bollinger` from `src/twstock/ui/charts.py` into a shared module. They are intentionally throwaway; Phase 3 builds `src/twstock/indicators/core.py` from scratch. Decision recorded in the Phase 2 ADR.
+- **Do not execute trades at the same bar as the signal.** Engine execution is `next_open` only — signal at T's close, fill at T+1's open. The `execution` parameter is a `Literal["next_open"]` for v1; adding any other mode requires an ADR.
+- **Do not bypass the cost model.** There is no zero-cost backtest path. `TaiwanCostModel.stock_sell_tax = 0.003` and `etf_sell_tax = 0.001` are not configurable; commission and slippage are.
+- **Do not use `pd.Series.shift(-k)` for positive `k`** in any indicator, strategy, or feature. This is lookahead bias. Code review check: search for `shift(-` before merging any Phase 3+ commit.
+- **Do not give `Strategy` subclasses cross-bar state.** `generate_signals` must be a pure function of `bars` — no instance attributes mutated across bars, no memory carried between calls. `assert_no_lookahead` perturbs future bars and checks earlier signals are unchanged; that audit is only meaningful if the strategy is pure, so a stateful strategy silently voids it. Decision: `journal/decisions/0004-custom-backtester-rejecting-vectorbt.md` (decision 3).
+- **Do not mutate the `bars` DataFrame inside `Strategy.generate_signals`.** It is the engine's reference copy. Call `.copy()` first if mutation is needed for indicator scratchpads.
 - Do not regenerate `tests/fixtures/anchor_dividends.json` from CI, pre-commit, or test setup. The committed JSON is the source of truth at test time. Regenerate only by running `scripts/build_anchors.py` deliberately, and only when the dividend reference table inside that script has been edited. Any regeneration must be reviewed in a commit diff alongside the dividend-table edit that justified it.
 - Do not auto-re-record VCR cassettes in CI or pre-commit. Re-record manually and review the diff.
 - Do not commit `.env`, anything in `data/`, anything in `logs/`, broker certificates, or anything in `secrets/`.
@@ -232,7 +274,7 @@ This repository will be public. Commits should be readable and quickly understan
   - `test` — tests only
   - `docs` — README, CLAUDE.md, journal, ADRs, comments, docstrings
   - `chore` — tooling, dependencies, build config, gitignore; nothing in `src/` runtime
-- **`scope`** — module or area touched, lowercase, matches the directory name when possible: `data`, `ui`, `storage`, `finmind`, `twse`, `backfill`, `quality`, `adjustments`, `api`, `universe`, `charts`, `names`. Omit only for genuinely cross-cutting commits (`chore: bump pyarrow`).
+- **`scope`** — module or area touched, lowercase, matches the directory name when possible: `data`, `ui`, `storage`, `finmind`, `twse`, `backfill`, `quality`, `adjustments`, `api`, `universe`, `charts`, `names`, `indicators`, `backtest`, `engine`, `portfolio`, `tearsheet`, `walkforward`, `strategies`. Omit only for genuinely cross-cutting commits (`chore: bump pyarrow`).
 - **`subject`** — imperative mood ("add", not "adds" or "added"), lowercase first word, no trailing period. Describes the *outcome*, not the activity.
 
 **Body** — required when the change has multiple distinct parts or when the *why* is not obvious from the header.
@@ -242,7 +284,7 @@ This repository will be public. Commits should be readable and quickly understan
 - Wrap at 72 characters.
 - Imperative mood, same as subject.
 - Each bullet 1–3 lines. Explain *what* and *why*. The diff already shows *how*.
-- Refer to code by symbol name (`_build_dividends`, `OHLCV_SCHEMA`, `candlestick_volume`), not by file path or line number.
+- Refer to code by symbol name (`_build_dividends`, `OHLCV_SCHEMA`, `candlestick_volume`, `TaiwanCostModel`, `assert_no_lookahead`), not by file path or line number.
 - **No phase or day references in commit messages.** Public-repo readers don't know what "Phase 1 Day 6" means. Use the scope and a descriptive subject instead.
 - Breaking changes: prefix the relevant bullet with `BREAKING CHANGE:`.
 
@@ -259,6 +301,7 @@ fix(quality): clamp missing-day check to ticker listing date
 chore: bump pandera to 0.20.4
 docs: add commit convention to CLAUDE.md
 test(adjustments): add anchor for Yageo 2022 capital reduction
+feat(indicators): add sma, ema, bollinger, rsi
 ```
 
 Multi-part, bulleted body:
@@ -345,6 +388,7 @@ uv run python scripts/backfill.py --tickers 2330       # one ticker, default ran
 uv run python scripts/backfill.py                      # all Top 50, default range
 uv run python scripts/backfill.py --start 2020-01-01   # custom range
 uv run python scripts/backfill.py --tickers 2330 --force   # re-fetch existing
+uv run python scripts/backfill.py --tickers 0050       # benchmark instrument (Phase 3)
 
 # Phase 1 — regenerate adjustment cross-check anchor fixture
 # (run only after editing the dividend reference table inside the script)
@@ -352,4 +396,10 @@ uv run python scripts/build_anchors.py
 
 # Phase 2 — inspection dashboard
 uv run streamlit run src/twstock/ui/app.py
+
+# Phase 3 — backtests
+uv run pytest tests/indicators tests/backtest           # phase 3 unit tests
+uv run pytest -m integration tests/backtest             # phase 3 end-to-end on real data
+uv run python scripts/phase_3_stability_report.py       # SMA walk-forward report
+# Programmatic API: see PHASE_3.md §1 for the canonical Engine.run example
 ```
