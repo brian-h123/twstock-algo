@@ -50,3 +50,28 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     result = result.fillna(100)  # not a warmup fill; avg_loss=0 means RSI is mathematically 100
     result.iloc[:window] = float("nan")
     return result
+
+
+def macd(
+    close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Returns (macd_line, signal_line, histogram).
+    macd_line = ema(close, fast) - ema(close, slow);
+    signal_line = ema(macd_line, signal); histogram = macd_line - signal_line."""
+    _validate(close)
+    macd_line = ema(close=close, window=fast) - ema(close=close, window=slow)
+    signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    histogram = macd_line - signal_line
+    return (macd_line, signal_line, histogram)
+
+
+def donchian_channels(
+    high: pd.Series, low: pd.Series, window: int = 20
+) -> tuple[pd.Series, pd.Series]:
+    """Returns (lower, upper). upper = high.rolling(window).max();
+    lower = low.rolling(window).min(). Value at T uses bars[T-window+1:T+1]."""
+    _validate(high)
+    _validate(low)
+    upper = high.rolling(window=window, min_periods=window).max()
+    lower = low.rolling(window=window, min_periods=window).min()
+    return (lower, upper)

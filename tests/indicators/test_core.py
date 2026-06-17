@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import pytest
 
-from twstock.indicators.core import bollinger_bands, ema, rsi, sma
+from twstock.indicators.core import bollinger_bands, donchian_channels, ema, macd, rsi, sma
 
 
 def make_series(values, start="2020-01-01"):
@@ -195,3 +195,139 @@ class TestRsi:
         s = pd.Series(list(range(30)), index=idx, dtype="int64")
         with pytest.raises(TypeError):
             rsi(s, window=14)
+
+
+# ---------------------------------------------------------------------------
+# MACD
+# ---------------------------------------------------------------------------
+
+
+class TestMacd:
+    def test_macd_line_warmup(self):
+        # fast=3, slow=5: macd_line NaN for first slow-1=4 bars
+        s = make_series([float(i) for i in range(1, 31)])
+        macd_line, _, _ = macd(s, fast=3, slow=5, signal=3)
+        assert macd_line.iloc[:4].isna().all()
+        assert macd_line.iloc[4:].notna().all()
+
+    def test_signal_line_warmup(self):
+        # fast=3, slow=5, signal=3: signal NaN for first slow+signal-2=6 bars
+        s = make_series([float(i) for i in range(1, 31)])
+        _, signal_line, _ = macd(s, fast=3, slow=5, signal=3)
+        assert signal_line.iloc[:6].isna().all()
+        assert signal_line.iloc[6:].notna().all()
+
+    def test_histogram_warmup_matches_signal(self):
+        s = make_series([float(i) for i in range(1, 31)])
+        _, signal_line, histogram = macd(s, fast=3, slow=5, signal=3)
+        assert histogram.isna().equals(signal_line.isna())
+
+    def test_macd_line_equals_ema_difference(self):
+        s = make_series([float(i) for i in range(1, 31)])
+        macd_line, _, _ = macd(s, fast=3, slow=5, signal=3)
+        pd.testing.assert_series_equal(macd_line, ema(s, 3) - ema(s, 5))
+
+    def test_histogram_equals_line_minus_signal(self):
+        s = make_series([float(i) for i in range(1, 31)])
+        macd_line, signal_line, histogram = macd(s, fast=3, slow=5, signal=3)
+        pd.testing.assert_series_equal(histogram, macd_line - signal_line)
+
+    def test_flat_series_gives_zero(self):
+        # all EMAs of a constant series equal the constant, so all outputs are 0
+        s = make_series([5.0] * 30)
+        macd_line, signal_line, histogram = macd(s, fast=3, slow=5, signal=3)
+        assert (macd_line.dropna() == 0.0).all()
+        assert (signal_line.dropna() == 0.0).all()
+        assert (histogram.dropna() == 0.0).all()
+
+    def test_index_preserved(self):
+        s = make_series([float(i) for i in range(1, 31)])
+        macd_line, signal_line, histogram = macd(s)
+        assert macd_line.index.equals(s.index)
+        assert signal_line.index.equals(s.index)
+        assert histogram.index.equals(s.index)
+
+    def test_type_error_not_series(self):
+        with pytest.raises(TypeError):
+            macd([1.0, 2.0, 3.0])
+
+    def test_type_error_no_datetime_index(self):
+        s = pd.Series([float(i) for i in range(30)], dtype="float64")
+        with pytest.raises(TypeError):
+            macd(s)
+
+    def test_type_error_wrong_dtype(self):
+        idx = pd.date_range("2020-01-01", periods=30, freq="B")
+        s = pd.Series(list(range(30)), index=idx, dtype="int64")
+        with pytest.raises(TypeError):
+            macd(s)
+
+
+# ---------------------------------------------------------------------------
+# Donchian Channels
+# ---------------------------------------------------------------------------
+
+
+class TestDonchianChannels:
+    def test_values(self):
+        # window=3: upper = rolling max of high, lower = rolling min of low
+        high = make_series([1.0, 2.0, 3.0, 4.0, 5.0])
+        low = make_series([0.5, 1.5, 2.5, 3.5, 4.5])
+        lower, upper = donchian_channels(high, low, window=3)
+        assert pd.isna(upper.iloc[0]) and pd.isna(upper.iloc[1])
+        assert pd.isna(lower.iloc[0]) and pd.isna(lower.iloc[1])
+        assert upper.iloc[2] == pytest.approx(3.0)  # max(1, 2, 3)
+        assert upper.iloc[3] == pytest.approx(4.0)  # max(2, 3, 4)
+        assert upper.iloc[4] == pytest.approx(5.0)  # max(3, 4, 5)
+        assert lower.iloc[2] == pytest.approx(0.5)  # min(0.5, 1.5, 2.5)
+        assert lower.iloc[3] == pytest.approx(1.5)  # min(1.5, 2.5, 3.5)
+        assert lower.iloc[4] == pytest.approx(2.5)  # min(2.5, 3.5, 4.5)
+
+    def test_warmup_nan_on_30_rows(self):
+        high = make_series([float(i) for i in range(1, 31)])
+        low = make_series([float(i) - 0.5 for i in range(1, 31)])
+        lower, upper = donchian_channels(high, low, window=5)
+        assert upper.iloc[:4].isna().all()
+        assert lower.iloc[:4].isna().all()
+        assert upper.iloc[4:].notna().all()
+        assert lower.iloc[4:].notna().all()
+
+    def test_upper_geq_lower(self):
+        high = make_series([float(i) + (i % 3) * 0.5 for i in range(1, 31)])
+        low = make_series([float(i) - (i % 3) * 0.5 for i in range(1, 31)])
+        lower, upper = donchian_channels(high, low, window=5)
+        assert (upper.dropna() >= lower.dropna()).all()
+
+    def test_upper_is_rolling_max(self):
+        high = make_series([float(i) + (i % 5) for i in range(1, 31)])
+        low = make_series([float(i) for i in range(1, 31)])
+        lower, upper = donchian_channels(high, low, window=5)
+        pd.testing.assert_series_equal(upper, high.rolling(5, min_periods=5).max())
+
+    def test_lower_is_rolling_min(self):
+        high = make_series([float(i) + (i % 5) for i in range(1, 31)])
+        low = make_series([float(i) for i in range(1, 31)])
+        lower, upper = donchian_channels(high, low, window=5)
+        pd.testing.assert_series_equal(lower, low.rolling(5, min_periods=5).min())
+
+    def test_index_preserved(self):
+        high = make_series([float(i) for i in range(1, 31)])
+        low = make_series([float(i) - 0.5 for i in range(1, 31)])
+        lower, upper = donchian_channels(high, low, window=5)
+        assert lower.index.equals(high.index)
+        assert upper.index.equals(high.index)
+
+    def test_type_error_not_series(self):
+        with pytest.raises(TypeError):
+            donchian_channels([1.0, 2.0, 3.0], [0.5, 1.5, 2.5])
+
+    def test_type_error_no_datetime_index(self):
+        s = pd.Series([1.0, 2.0, 3.0], dtype="float64")
+        with pytest.raises(TypeError):
+            donchian_channels(s, s, window=2)
+
+    def test_type_error_wrong_dtype(self):
+        idx = pd.date_range("2020-01-01", periods=3, freq="B")
+        s = pd.Series([1, 2, 3], index=idx, dtype="int64")
+        with pytest.raises(TypeError):
+            donchian_channels(s, s, window=2)
