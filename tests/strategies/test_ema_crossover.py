@@ -76,6 +76,14 @@ class TestEmaCrossoverParamValidation:
         with pytest.raises(ValueError):
             EmaCrossover(fast=10, slow=5)
 
+    def test_raises_when_fast_is_zero(self):
+        with pytest.raises(ValueError):
+            EmaCrossover(fast=0, slow=5)
+
+    def test_raises_when_slow_is_zero(self):
+        with pytest.raises(ValueError):
+            EmaCrossover(fast=1, slow=0)
+
     def test_canonical_params_stored(self):
         """Default params match the spec (fast=20, slow=60)."""
         s = EmaCrossover()

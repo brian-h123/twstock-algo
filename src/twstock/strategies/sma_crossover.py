@@ -14,6 +14,8 @@ class SmaCrossover(Strategy):
     """
 
     def __init__(self, fast: int = 20, slow: int = 60) -> None:
+        if fast < 1 or slow < 1:
+            raise ValueError("fast and slow must be positive")
         if fast >= slow:
             raise ValueError("fast must be strictly less than slow")
         self.fast = fast
