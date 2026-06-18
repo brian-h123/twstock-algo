@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from twstock.backtest.result import BacktestResult
+from twstock.backtest.trades import Grouping, Matching, build_round_trips
 
 _ANN_FACTOR = 252  # TWSE daily sessions; committed policy — see phase_3_references.md borrow #14
 
@@ -53,35 +54,6 @@ def _max_drawdown_duration(equity: pd.Series) -> int:
     return int(run_lengths.max()) if underwater.any() else 0
 
 
-def _round_trips(trades: pd.DataFrame) -> pd.DataFrame:
-    if trades.empty:
-        return pd.DataFrame(columns=["ticker", "entry_price", "exit_price", "shares", "ret"])
-
-    rows = []
-    for ticker, grp in trades.groupby("ticker"):
-        buys = grp[grp["side"] == "buy"].sort_values("timestamp").reset_index(drop=True)
-        sells = grp[grp["side"] == "sell"].sort_values("timestamp").reset_index(drop=True)
-        n = min(len(buys), len(sells))
-        if n == 0:
-            continue
-        trip = pd.DataFrame(
-            {
-                "ticker": ticker,
-                "entry_price": buys["fill_price"].to_numpy()[:n],
-                "exit_price": sells["fill_price"].to_numpy()[:n],
-                "shares": buys["shares"].to_numpy()[:n],
-            }
-        )
-        trip["ret"] = trip["exit_price"] / trip["entry_price"] - 1
-        rows.append(trip)
-
-    return (
-        pd.concat(rows, ignore_index=True)
-        if rows
-        else pd.DataFrame(columns=["ticker", "entry_price", "exit_price", "shares", "ret"])
-    )
-
-
 def tear_sheet(result: BacktestResult, benchmark: BacktestResult | None = None) -> dict:
     """Return a dict of metrics. Keys:
     total_return, cagr, sharpe, sortino, max_drawdown,
@@ -94,7 +66,7 @@ def tear_sheet(result: BacktestResult, benchmark: BacktestResult | None = None) 
     trades = result.trades
 
     years = (equity.index[-1] - equity.index[0]).days / 365.25
-    trips = _round_trips(trades=trades)
+    trips = build_round_trips(trades=trades, grouping=Grouping.FLAT_TO_FLAT, matching=Matching.FIFO)
 
     total_return = equity.iloc[-1] / equity.iloc[0] - 1
     cagr = _cagr(equity=equity, years=years)
