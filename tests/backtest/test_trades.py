@@ -261,3 +261,91 @@ class TestMatching:
         fifo = build_round_trips(trades, grouping=Grouping.FILL_TO_FILL, matching=Matching.FIFO)
         lifo = build_round_trips(trades, grouping=Grouping.FILL_TO_FILL, matching=Matching.LIFO)
         assert fifo.iloc[0]["entry_price"] != lifo.iloc[0]["entry_price"]
+
+
+# ── cost-adjusted basis (Option B) ───────────────────────────────────────────
+
+
+class TestCostAdjusted:
+    def test_buy_commission_raises_basis(self):
+        # Buy 1000 @ 100 with commission=100 → basis = (100_000 + 100) / 1000 = 100.1
+        # Sell 1000 @ 110 with no costs → exit = 110.0
+        # ret = 110.0 / 100.1 - 1  (lower than gross 10%)
+        trades = _make_trades(
+            [
+                ("2020-01-02", "2330", "buy", 100.0, 1000, 100.0, 0.0),
+                ("2020-01-03", "2330", "sell", 110.0, 1000, 0.0, 0.0),
+            ]
+        )
+        result = build_round_trips(trades, grouping=Grouping.FLAT_TO_FLAT, matching=Matching.FIFO)
+        row = result.iloc[0]
+        assert row["entry_price"] == pytest.approx(100.1)
+        assert row["exit_price"] == pytest.approx(110.0)
+        assert row["ret"] == pytest.approx(110.0 / 100.1 - 1)
+        assert row["ret"] < 0.10  # strictly less than gross 10%
+
+    def test_sell_costs_reduce_exit(self):
+        # Buy 1000 @ 100 with no costs → basis = 100.0
+        # Sell 1000 @ 110, commission=94.05, tax=330 → exit = (110_000 - 424.05) / 1000
+        # ret = 109.57595 / 100.0 - 1  (lower than gross 10%)
+        trades = _make_trades(
+            [
+                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
+                ("2020-01-03", "2330", "sell", 110.0, 1000, 94.05, 330.0),
+            ]
+        )
+        result = build_round_trips(trades, grouping=Grouping.FLAT_TO_FLAT, matching=Matching.FIFO)
+        row = result.iloc[0]
+        expected_exit = (110_000 - 424.05) / 1000  # = 109.57595
+        assert row["exit_price"] == pytest.approx(expected_exit)
+        assert row["ret"] == pytest.approx(expected_exit / 100.0 - 1)
+        assert row["ret"] < 0.10
+
+    def test_taiwan_costs_both_sides(self):
+        # Realistic Taiwan: 0.0855% commission per side, 0.3% sell tax.
+        # Buy 1000 @ 100: commission=85.5, tax=0 → basis=100.0855
+        # Sell 1000 @ 110: commission=94.05, tax=330 → exit=109.57595
+        # ret = 109.57595 / 100.0855 - 1  (meaningfully below gross 10%)
+        trades = _make_trades(
+            [
+                ("2020-01-02", "2330", "buy", 100.0, 1000, 85.5, 0.0),
+                ("2020-01-03", "2330", "sell", 110.0, 1000, 94.05, 330.0),
+            ]
+        )
+        result = build_round_trips(trades, grouping=Grouping.FLAT_TO_FLAT, matching=Matching.FIFO)
+        row = result.iloc[0]
+        expected_basis = (100_000 + 85.5) / 1000  # 100.0855
+        expected_exit = (110_000 - 424.05) / 1000  # 109.57595
+        assert row["entry_price"] == pytest.approx(expected_basis)
+        assert row["exit_price"] == pytest.approx(expected_exit)
+        assert row["ret"] == pytest.approx(expected_exit / expected_basis - 1)
+
+    def test_fill_to_fill_uses_cost_adjusted_exit(self):
+        # FILL_TO_FILL branch must also use the cost-adjusted exit (not raw fill_price).
+        # Buy 1000 @ 100, no buy costs → basis=100.0
+        # Sell 1000 @ 110, commission=94.05, tax=330 → exit=109.57595
+        trades = _make_trades(
+            [
+                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
+                ("2020-01-03", "2330", "sell", 110.0, 1000, 94.05, 330.0),
+            ]
+        )
+        result = build_round_trips(trades, grouping=Grouping.FILL_TO_FILL, matching=Matching.FIFO)
+        row = result.iloc[0]
+        expected_exit = (110_000 - 424.05) / 1000
+        assert row["exit_price"] == pytest.approx(expected_exit)
+        assert row["ret"] == pytest.approx(expected_exit / 100.0 - 1)
+        assert row["ret"] < 0.10  # not the gross 10%
+
+    def test_zero_cost_unchanged(self):
+        # Zero costs: Option B collapses to Option A (basis == fill_price).
+        trades = _make_trades(
+            [
+                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
+                ("2020-01-03", "2330", "sell", 110.0, 1000, 0.0, 0.0),
+            ]
+        )
+        result = build_round_trips(trades, grouping=Grouping.FLAT_TO_FLAT, matching=Matching.FIFO)
+        assert result.iloc[0]["entry_price"] == pytest.approx(100.0)
+        assert result.iloc[0]["exit_price"] == pytest.approx(110.0)
+        assert result.iloc[0]["ret"] == pytest.approx(0.10)

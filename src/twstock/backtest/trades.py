@@ -43,7 +43,9 @@ def build_round_trips(
 
         for _, row in grp.sort_values("timestamp").iterrows():
             if row["side"] == "buy":
-                lot_deque.append(_Lot(shares=row.shares, basis=row.fill_price))
+                lot_deque.append(
+                    _Lot(shares=row.shares, basis=(row.notional + row.total_cost) / row.shares)
+                )
                 open_shares += row.shares
 
             elif row["side"] == "sell":
@@ -57,8 +59,7 @@ def build_round_trips(
                         {
                             "shares": consume,
                             "basis": lot.basis,
-                            "exit_price": row.fill_price,
-                            # "pnl": (row.fill_price - lot.basis) * consume
+                            "exit_price": (row.notional - row.total_cost) / row.shares,
                         }
                     )
                     if consume < lot.shares:
@@ -73,7 +74,7 @@ def build_round_trips(
 
                 if grouping in (Grouping.FILL_TO_FILL, Grouping.FLAT_TO_REDUCED):
                     entry_price = sum(s["shares"] * s["basis"] for s in fill_slices) / consumed
-                    exit_price = row.fill_price
+                    exit_price = fill_slices[0]["exit_price"]
                     rows.append(
                         {
                             "ticker": ticker,
