@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from twstock.backtest.cross_sectional import CrossSectionalStrategy
 from twstock.backtest.strategy import Strategy
 
 
@@ -41,4 +42,42 @@ def assert_no_lookahead(
         raise LookaheadError(
             f"Strategy signals differ on {changed.sum()} bar(s) before "
             f"perturbation point (index {window}):\n{diff}"
+        )
+
+
+def assert_no_lookahead_panel(
+    strategy: CrossSectionalStrategy,
+    panel: dict[str, pd.DataFrame],
+    perturbation_start: int = -50,
+    tolerance: float = 1e-9,
+) -> None:
+    original_signals = strategy.generate_scores(panel=panel)
+
+    perturbed_panel = {ticker: bars.copy() for ticker, bars in panel.items()}
+    rng = np.random.default_rng(42)
+    for _, bars in perturbed_panel.items():
+        future_slice = bars.iloc[perturbation_start:].copy()
+        perm = rng.permutation(len(future_slice))
+        bars.iloc[perturbation_start:] = future_slice.values[perm]
+    perturbed_signals = strategy.generate_scores(panel=perturbed_panel)
+
+    n_bars = len(next(iter(panel.values())))
+    window = n_bars + perturbation_start
+    orig_window = original_signals.iloc[:window]
+    pert_window = perturbed_signals.iloc[:window]
+
+    both_nan = orig_window.isna() & pert_window.isna()
+    one_nan = orig_window.isna() ^ pert_window.isna()
+    changed = ~both_nan & (one_nan | ((orig_window - pert_window).abs() > tolerance))
+
+    if changed.any(axis=None):
+        diff = pd.DataFrame(
+            {
+                "original": orig_window.where(changed).stack(),
+                "perturbed": pert_window.where(changed).stack(),
+            }
+        )
+        raise LookaheadError(
+            f"Strategy signals differ on {changed.sum().sum()} (date, ticker) cell(s) before "
+            f"perturbation point (index {window}): \n{diff}"
         )
