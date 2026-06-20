@@ -324,8 +324,8 @@ One commit per step (Conventional Commits, `Co-Authored-By: Claude` trailer). Ea
 ### 4b — Portfolio runner
 
 9. **`feat(backtest): cross-sectional strategy interface + adapter`** — `cross_sectional.py`; panel-aware `assert_no_lookahead` in `audit.py`. Validate plumbing with `CrossSectionalAdapter(SmaCrossover())` producing a scores panel (no runner yet).
-10. **`feat(backtest): equal-weight top-N allocator`** — `allocator.py` + the `n × cap ≥ 1` validation + under-supply-holds-cash behaviour.
-11. **`feat(backtest): tie-break policies`** — `tiebreak.py` (`LiquidityTieBreak`, `HoldAll`).
+10. **`feat(backtest): tie-break policies`** — `tiebreak.py` (`LiquidityTieBreak`, `HoldAll`). Implemented before the allocator because `EqualWeightTopN` takes a `TieBreakPolicy` as a constructor arg.
+11. **`feat(backtest): equal-weight top-N allocator`** — `allocator.py` + the `n × cap ≥ 1` validation + under-supply-holds-cash behaviour.
 12. **`feat(backtest): rebalance schedules`** — `rebalance.py` (`RebalanceContext`, `Monthly/Weekly/Daily/Quarterly`), XTAI-resolved.
 13. **`feat(backtest): portfolio reconciler and engine dispatch`** — `reconciler.py`; wire `Engine.run` to dispatch `CrossSectionalStrategy` through cadence → allocate → tie-break → reconcile, sells-before-buys. Integration-test with **adapter-lifted SMA** across the universe (known binary behaviour validates the whole path). Includes the rotation/under-investment regression test.
 14. **`feat(strategies): add CrossSectionalMomentum`** — native cardinal strategy. Full integration test: panel `assert_no_lookahead`, non-NaN metrics, net ≠ gross, audit passes, vs 0050 B&H.
