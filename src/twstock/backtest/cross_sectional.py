@@ -6,6 +6,14 @@ from twstock.backtest.strategy import Strategy
 
 
 class CrossSectionalStrategy(ABC):
+    """Abstract cross-sectional strategy interface.
+
+    A cross-sectional strategy maps a panel of OHLCV bars (one DataFrame per
+    ticker) to a date-indexed, ticker-columned scores DataFrame. Scores at bar
+    T must be computable using only data up to and including T. The Engine
+    passes scores to an Allocator to determine target weights.
+    """
+
     @abstractmethod
     def generate_scores(self, panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Date-indexed, ticker-columned float scores. NaN = not eligible.
