@@ -70,6 +70,7 @@ def test_get_corporate_actions_returns_valid_schema(source):
                 "cash_and_stock_dividend",
                 "rights_issue",
                 "capital_reduction",
+                "stock_split",
             ]
         )
         .all()
