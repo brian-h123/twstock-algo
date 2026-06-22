@@ -82,12 +82,24 @@ class Engine:
                     if order.ticker not in open_prices:
                         continue  # ticker not trading today — skip
                     if order.side == "buy":
-                        portfolio.buy(
-                            ticker=order.ticker,
-                            shares=order.shares,
-                            reference_price=open_prices[order.ticker],
-                            timestamp=T,
+                        ref = open_prices[order.ticker]
+                        fill_px = self._cost_model.apply_slippage(ref, "buy")
+                        # Two conservative bounds — proportional commission and NT$20 minimum —
+                        # take the smaller so residual-cash tiny orders don't overshoot.
+                        affordable_prop = math.floor(
+                            portfolio.cash / (fill_px * (1 + self._cost_model.commission_pct))
                         )
+                        cash_net = portfolio.cash - self._cost_model.commission_min_twd
+                        affordable_min = math.floor(cash_net / fill_px) if cash_net > 0 else 0
+                        affordable = min(affordable_prop, affordable_min)
+                        shares = min(order.shares, max(0, affordable))
+                        if shares > 0:
+                            portfolio.buy(
+                                ticker=order.ticker,
+                                shares=shares,
+                                reference_price=ref,
+                                timestamp=T,
+                            )
                     elif order.side == "sell":
                         portfolio.sell(
                             ticker=order.ticker,
