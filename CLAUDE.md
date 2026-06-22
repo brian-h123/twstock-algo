@@ -2,8 +2,8 @@
 
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
-**Last updated:** 2026-06-17
-**Current phase:** Phase 4 — Technical Strategies (Phase 3 complete; see `journal/phase_3_retro.md`)
+**Last updated:** 2026-06-22
+**Current phase:** Phase 5 — Paper-Trading Simulator (Phase 4 complete; see `journal/phase_4_retro.md`)
 
 ---
 
@@ -88,7 +88,8 @@ twstock-algo/
 ├── PHASE_1.md                   ← Phase 1 spec (done)
 ├── PHASE_2.md                   ← Phase 2 spec (done)
 ├── PHASE_3.md                   ← Phase 3 spec (done)
-├── PHASE_4.md                   ← Phase 4 spec (active)
+├── PHASE_4.md                   ← Phase 4 spec (done)
+├── PHASE_5.md                   ← Phase 5 spec (active)
 ├── LICENSE                      ← MIT
 ├── pyproject.toml
 ├── .python-version
@@ -216,7 +217,9 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 
 - Phase 3 — Backtesting Engine (closed 2026-06-13). Custom thin engine; T+1-open execution; Taiwan cost model always on; `Strategy` ABC; `WalkForwardSplit`; SMA crossover reference strategy; tear sheet with full metrics. ~230 tests passing. Retro: `journal/phase_3_retro.md`.
 
-**Active:** Phase 4 — Technical Strategies. Full spec: `PHASE_4.md` (4a single-asset strategies + 4b portfolio runner). Builds on the Phase 3 `Engine` and `Strategy` ABC; adds the cross-sectional strategy interface, a holdings-agnostic allocator, monthly rebalancing, and a lot-based trade ledger. Six single-asset strategies + cross-sectional momentum, each with an honest tear sheet. Architecture in ADRs `0005` (cash/settlement) and `0006` (portfolio runner).
+- Phase 4 — Technical Strategies (closed 2026-06-22). Six single-asset strategies + `CrossSectionalMomentum`; portfolio runner with `CrossSectionalStrategy` ABC, `EqualWeightTopN` allocator, `Monthly` rebalance, `reconcile()`, lot-based FIFO ledger. ~310 tests passing. Retro: `journal/phase_4_retro.md`. Pre-Phase-5 prerequisite: ADR 0007 stock split fix.
+
+**Active:** Phase 5 — Paper-Trading Simulator. Full spec: `PHASE_5.md`.
 
 **Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 and Phase 3 import from here only):
 
@@ -243,7 +246,7 @@ from twstock.backtest.tearsheet import tear_sheet, equity_curve_figure
 from twstock.strategies.sma_crossover import SmaCrossover
 ```
 
-**Phase 4 will expose these new public symbols** for Phase 5+:
+**Phase 4 exposes these public symbols** for Phase 5+:
 
 ```python
 from twstock.backtest.cross_sectional import CrossSectionalStrategy, CrossSectionalAdapter
@@ -264,7 +267,7 @@ from twstock.strategies.cross_sectional_momentum import CrossSectionalMomentum
 ## 7. Guardrails — DO NOT
 
 - Do not place orders against a real broker account. All trading code paths through Phase 7 must use the simulator. Live trading is gated on Phase 8 explicit greenlight.
-- Phases run in order: 1 → 2 → 3 → 4 → ... Do not start Phase 5 work (paper-sim, broker, shorts, partial fills) until Phase 4 exits cleanly.
+- Phases run in order: 1 → 2 → 3 → 4 → 5 → ... Do not start Phase 6 work (ML strategies) until Phase 5 exits cleanly.
 - Do not bypass the `DataSource` interface to fetch market data ad-hoc.
 - Do not read or write Parquet outside of `storage.py`.
 - **Do not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or any strategy/backtest module into `src/twstock/ui/`.** The dashboard is a thin layer over `twstock.data.api`, `twstock.data.storage`, and `twstock.universe`. Mechanical enforcement (`import-linter`) is a Phase 8 ticket; reviewed by hand until then.
@@ -290,11 +293,15 @@ from twstock.strategies.cross_sectional_momentum import CrossSectionalMomentum
 ## 8. Working Rhythm
 
 - **Sunday:** weekly sprint plan in `journal/weekly/<YYYY-WNN>.md`
-- **Each working day:** append a dated section (`## <YYYY-MM-DD>`) to that week's file — three sub-sections: _Did_, _Learned_, _Next_
+- **Each working day:** append a dated section (`## <YYYY-MM-DD>`) to that week's file — three sub-sections: _Did_, _Learned_, _Next_. Update toward the end of the day's session, not mid-session. Claude Code should prompt for this at natural session end-points.
 - **Saturday:** append a retrospective section to that week's file
 - **Architectural decisions:** captured in `journal/decisions/<NNNN>-<slug>.md` (lightweight ADR format)
 
 When starting a session, read the current week's file to pick up context. When ending a session, append tomorrow's dated stub with the _Next_ section filled in.
+
+**Weekly journal commit timing:** `journal/weekly/<YYYY-WNN>.md` is committed once per week — Sunday night or Monday, after the retrospective is written. Do not commit mid-week journal updates as standalone commits; let the week accumulate. Other journal files (decisions, ADRs, retros) follow the normal commit trigger — commit immediately when appended.
+
+**Division of labor:** The user leads implementation. Claude Code's role in `src/` is to provide hints, check mental models, and spot issues when asked — not to write implementation code unprompted. Claude Code's primary code contribution is writing pytest tests. Claude Code must prompt the user before making edits to any file in the codebase and wait for explicit approval.
 
 ## 9. Commit Convention
 
@@ -386,7 +393,8 @@ Claude Code proactively offers to commit at these moments. Each is a hard trigge
 | Trigger                                                                              | Why                                                                    |
 | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | A step in `PHASE_N.md §5 Build sequence` is complete and tests pass                  | One commit per step is the unit of progress for the phase              |
-| A journal entry is appended (`journal/weekly/<YYYY-WNN>.md` or `journal/decisions/`) | Journal commits are part of the record; don't let them sit uncommitted |
+| A `journal/decisions/`, ADR, or retro file is appended or updated | Non-weekly journal files are part of the record; commit immediately |
+| The week ends (Sunday night / Monday) and `journal/weekly/<YYYY-WNN>.md` has the retro | Weekly journals accumulate all week; one commit per completed week |
 | `CLAUDE.md`, `PROJECT_PLAN.md`, or any `PHASE_N.md` is edited                        | Spec changes belong in their own commit, separate from code            |
 | A test suite turns from red to green                                                 | The fix is a discrete unit; commit before moving on                    |
 | A `chore:`-class change is complete (dep added, config edited)                       | Don't let tooling churn pile up with code changes                      |
