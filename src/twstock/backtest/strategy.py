@@ -4,11 +4,15 @@ import pandas as pd
 
 
 class Strategy(ABC):
-    """Abstract strategy interface.
+    """Abstract strategy interface for single-ticker strategies.
 
-    A strategy maps OHLCV bars to target positions. Signals at bar T
-    must be computable using only bars[:T+1] (data up to and including T).
-    Execution is performed by the Engine at bar T+1 open.
+    A strategy maps OHLCV bars for a *single* ticker to target positions.
+    It has no awareness of other tickers — ``generate_signals`` receives
+    one ticker's bars in isolation. Cross-ticker ranking or scoring belongs
+    in ``CrossSectionalStrategy``.
+
+    Signals at bar T must be computable using only bars[:T+1] (data up to
+    and including T). Execution is performed by the Engine at bar T+1 open.
     """
 
     @abstractmethod
