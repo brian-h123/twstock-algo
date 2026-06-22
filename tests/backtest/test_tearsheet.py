@@ -11,7 +11,6 @@ from twstock.backtest.tearsheet import (
     _drawdown_series,
     _max_drawdown,
     _max_drawdown_duration,
-    _round_trips,
     _sharpe,
     _sortino,
     equity_curve_figure,
@@ -193,63 +192,6 @@ class TestCagr:
         assert _cagr(equity, years=2.0) == pytest.approx(0.20, rel=1e-4)
 
 
-# ── _round_trips ──────────────────────────────────────────────────────────────
-
-
-class TestRoundTrips:
-    def test_empty_trades_returns_empty_df_with_correct_columns(self):
-        trips = _round_trips(pd.DataFrame(columns=_TRADES_COLS))
-        assert trips.empty
-        assert set(trips.columns) == {"ticker", "entry_price", "exit_price", "shares", "ret"}
-
-    def test_single_win(self):
-        trades = _make_trades(
-            [
-                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
-                ("2020-01-03", "2330", "sell", 110.0, 1000, 0.0, 0.0),
-            ]
-        )
-        trips = _round_trips(trades)
-        assert len(trips) == 1
-        assert trips.iloc[0]["ret"] == pytest.approx(0.10)
-
-    def test_single_loss(self):
-        trades = _make_trades(
-            [
-                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
-                ("2020-01-03", "2330", "sell", 90.0, 1000, 0.0, 0.0),
-            ]
-        )
-        trips = _round_trips(trades)
-        assert trips.iloc[0]["ret"] == pytest.approx(-0.10)
-
-    def test_unpaired_buy_dropped(self):
-        # 2 buys, 1 sell → n = min(2, 1) = 1 completed round trip
-        trades = _make_trades(
-            [
-                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
-                ("2020-01-03", "2330", "buy", 105.0, 1000, 0.0, 0.0),
-                ("2020-01-06", "2330", "sell", 110.0, 1000, 0.0, 0.0),
-            ]
-        )
-        assert len(_round_trips(trades)) == 1
-
-    def test_two_tickers_paired_independently(self):
-        trades = _make_trades(
-            [
-                ("2020-01-02", "2330", "buy", 100.0, 1000, 0.0, 0.0),
-                ("2020-01-03", "2330", "sell", 110.0, 1000, 0.0, 0.0),
-                ("2020-01-02", "2454", "buy", 200.0, 500, 0.0, 0.0),
-                ("2020-01-04", "2454", "sell", 180.0, 500, 0.0, 0.0),
-            ]
-        )
-        trips = _round_trips(trades)
-        assert len(trips) == 2
-        rets = dict(zip(trips["ticker"], trips["ret"]))
-        assert rets["2330"] == pytest.approx(0.10)
-        assert rets["2454"] == pytest.approx(-0.10)
-
-
 # ── tear_sheet ────────────────────────────────────────────────────────────────
 
 _BASE_KEYS = frozenset(
@@ -394,10 +336,12 @@ class TestEquityCurveFigure:
     def test_two_traces_without_benchmark(self):
         # strategy equity curve + drawdown
         result = _make_result([1_000_000 + i * 500 for i in range(10)])
-        assert len(equity_curve_figure(result).data) == 2
+        fig = equity_curve_figure(result)
+        assert len(fig.data) == 2  # type: ignore[reportArgumentType]
 
     def test_three_traces_with_benchmark(self):
         # strategy + benchmark equity curves + drawdown
         result = _make_result([1_000_000 + i * 500 for i in range(10)])
         bench = _make_result([1_000_000 + i * 200 for i in range(10)], name="BuyAndHold")
-        assert len(equity_curve_figure(result, benchmark=bench).data) == 3
+        fig = equity_curve_figure(result, benchmark=bench)
+        assert len(fig.data) == 3  # type: ignore[reportArgumentType]

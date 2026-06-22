@@ -2,8 +2,8 @@
 
 > **Purpose of this document.** A single reference covering project goals, locked decisions, and the full phase plan. Designed to be pasted into new Claude chats so any conversation can pick up project context without re-explaining everything. Updated at the end of each phase.
 
-**Last updated:** 2026-06-13
-**Current phase:** Phase 4 — Technical Strategies (Phase 3 complete; see `journal/phase_3_retro.md`)
+**Last updated:** 2026-06-22
+**Current phase:** Phase 5 — Paper-Trading Simulator (Phase 4 complete; see `journal/phase_4_retro.md`)
 **Repo:** `twstock-algo` (private GitHub)
 
 ---
@@ -356,7 +356,7 @@ based on what I learned, (2) produce a brief retrospective, and
 | 1 — Data Pipeline | Done | 2026-05-11 | 2026-05-17 | 50/50 tickers backfilled; 111 tests passing; all exit criteria met. Retro: `journal/phase_1_retro.md`. Open: FU-05 (pre-TWSE prices for 6669/7769/6919) must be resolved before Phase 2 starts. |
 | 2 — Dashboard | Done | 2026-05-20 | 2026-05-21 | All exit criteria met; 31 new tests (160 total); all 50 tickers render in <2s warm. Retro: `journal/phase_2_retro.md`. |
 | 3 — Backtester | Done | 2026-05-30 | 2026-06-13 | Custom thin engine; T+1 execution; Taiwan cost model; `WalkForwardSplit`; SMA crossover reference strategy; full tear sheet. Retro: `journal/phase_3_retro.md`. |
-| 4 — Technical strategies | Pending | — | — | — |
+| 4 — Technical strategies | Done | 2026-06-14 | 2026-06-22 | 6 single-asset strategies + CrossSectionalMomentum; portfolio runner (ADR 0005/0006); ~310 tests passing. Retro: `journal/phase_4_retro.md`. Pre-Phase-5: ADR 0007 stock split fix. |
 | 5 — Paper sim | Pending | — | — | — |
 | 6 — ML strategies | Pending | — | — | — |
 | 7 — Alt data | Pending | — | — | — |

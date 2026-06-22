@@ -1,3 +1,4 @@
+from twstock.backtest.allocator import Allocator, EqualWeightTopN
 from twstock.backtest.audit import assert_no_lookahead
 from twstock.backtest.cost_model import TaiwanCostModel
 from twstock.backtest.engine import Engine
@@ -15,4 +16,6 @@ __all__ = [
     "BuyAndHold",
     "WalkForwardSplit",
     "assert_no_lookahead",
+    "Allocator",
+    "EqualWeightTopN",
 ]
