@@ -14,7 +14,7 @@ interactions:
     uri: https://api.finmindtrade.com/api/v4/data?data_id=2330&dataset=TaiwanStockDividend&start_date=2019-01-01
   response:
     body:
-      string: '{"msg":"success","status":200,"data":[{"date":"2023-09-29","stock_id":"2330","year":"112年第2季","StockEarningsDistribution":0.0,"StockStatutorySurplus":0.0,"StockExDividendTradingDate":"","TotalEmployeeStockDividend":0.0,"TotalEmployeeStockDividendAmount":0.0,"RatioOfEmployeeStockDividendOfTotal":0.0,"RatioOfEmployeeStockDividend":0.0,"CashEarningsDistribution":3.0,"CashStatutorySurplus":0.0,"CashExDividendTradingDate":"2023-09-14","CashDividendPaymentDate":"2023-10-05","TotalEmployeeCashDividend":0.0,"TotalNumberOfCashCapitalIncrease":0.0,"CashIncreaseSubscriptionRate":0.0,"CashIncreaseSubscriptionpRrice":0.0,"RemunerationOfDirectorsAndSupervisors":0.0,"ParticipateDistributionOfTotalShares":25930000000.0,"AnnouncementDate":"2023-07-20","AnnouncementTime":"18:30:00"},{"date":"2023-12-29","stock_id":"2330","year":"112年第3季","StockEarningsDistribution":0.0,"StockStatutorySurplus":0.0,"StockExDividendTradingDate":"","TotalEmployeeStockDividend":0.0,"TotalEmployeeStockDividendAmount":0.0,"RatioOfEmployeeStockDividendOfTotal":0.0,"RatioOfEmployeeStockDividend":0.0,"CashEarningsDistribution":3.0,"CashStatutorySurplus":0.0,"CashExDividendTradingDate":"2023-12-14","CashDividendPaymentDate":"2024-01-08","TotalEmployeeCashDividend":0.0,"TotalNumberOfCashCapitalIncrease":0.0,"CashIncreaseSubscriptionRate":0.0,"CashIncreaseSubscriptionpRrice":0.0,"RemunerationOfDirectorsAndSupervisors":0.0,"ParticipateDistributionOfTotalShares":25930000000.0,"AnnouncementDate":"2023-10-19","AnnouncementTime":"18:30:00"}]}'
+      string: "{\"msg\":\"success\",\"status\":200,\"data\":[{\"date\":\"2023-09-29\",\"stock_id\":\"2330\",\"year\":\"112\u5E74\u7B2C2\u5B63\",\"StockEarningsDistribution\":0.0,\"StockStatutorySurplus\":0.0,\"StockExDividendTradingDate\":\"\",\"TotalEmployeeStockDividend\":0.0,\"TotalEmployeeStockDividendAmount\":0.0,\"RatioOfEmployeeStockDividendOfTotal\":0.0,\"RatioOfEmployeeStockDividend\":0.0,\"CashEarningsDistribution\":3.0,\"CashStatutorySurplus\":0.0,\"CashExDividendTradingDate\":\"2023-09-14\",\"CashDividendPaymentDate\":\"2023-10-05\",\"TotalEmployeeCashDividend\":0.0,\"TotalNumberOfCashCapitalIncrease\":0.0,\"CashIncreaseSubscriptionRate\":0.0,\"CashIncreaseSubscriptionpRrice\":0.0,\"RemunerationOfDirectorsAndSupervisors\":0.0,\"ParticipateDistributionOfTotalShares\":25930000000.0,\"AnnouncementDate\":\"2023-07-20\",\"AnnouncementTime\":\"18:30:00\"},{\"date\":\"2023-12-29\",\"stock_id\":\"2330\",\"year\":\"112\u5E74\u7B2C3\u5B63\",\"StockEarningsDistribution\":0.0,\"StockStatutorySurplus\":0.0,\"StockExDividendTradingDate\":\"\",\"TotalEmployeeStockDividend\":0.0,\"TotalEmployeeStockDividendAmount\":0.0,\"RatioOfEmployeeStockDividendOfTotal\":0.0,\"RatioOfEmployeeStockDividend\":0.0,\"CashEarningsDistribution\":3.0,\"CashStatutorySurplus\":0.0,\"CashExDividendTradingDate\":\"2023-12-14\",\"CashDividendPaymentDate\":\"2024-01-08\",\"TotalEmployeeCashDividend\":0.0,\"TotalNumberOfCashCapitalIncrease\":0.0,\"CashIncreaseSubscriptionRate\":0.0,\"CashIncreaseSubscriptionpRrice\":0.0,\"RemunerationOfDirectorsAndSupervisors\":0.0,\"ParticipateDistributionOfTotalShares\":25930000000.0,\"AnnouncementDate\":\"2023-10-19\",\"AnnouncementTime\":\"18:30:00\"}]}"
     headers:
       Access-Control-Allow-Origin:
       - '*'
@@ -52,6 +52,36 @@ interactions:
       - application/json
       Date:
       - Mon, 18 May 2026 10:00:01 GMT
+      Server:
+      - uvicorn
+    status:
+      code: 200
+      message: OK
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - twstock-algo/0.1
+    method: GET
+    uri: https://api.finmindtrade.com/api/v4/data?data_id=2330&dataset=TaiwanStockSplitPrice&start_date=2019-01-01
+  response:
+    body:
+      string: '{"msg":"success","status":200,"data":[]}'
+    headers:
+      Access-Control-Allow-Origin:
+      - '*'
+      Content-Length:
+      - '40'
+      Content-Type:
+      - application/json
+      Date:
+      - Mon, 22 Jun 2026 20:01:31 GMT
       Server:
       - uvicorn
     status:

@@ -29,7 +29,7 @@ from twstock.backtest.tearsheet import tear_sheet
 from twstock.universe import get_top50_universe
 
 DEFAULT_START = date(2020, 1, 1)
-DEFAULT_END = date(2025, 6, 17)  # day before 0050 4:1 split; see pre-Phase-5 stock-split ADR
+DEFAULT_END = date.today()
 BENCHMARK_TICKER = "0050"
 EXAMPLE_TICKER = "2330"  # shown in full detail per D3
 

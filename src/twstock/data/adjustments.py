@@ -40,6 +40,8 @@ def _compute_factor(action: pd.Series, ref_close: float) -> float:
         # Applied directly: pre-event prices are scaled by this ratio so that
         # the T-1 bar continuity-adjusts to the post-reduction reference price.
         return action["ratio"]
+    elif action_type == "stock_split":
+        return action["ratio"]
     else:
         raise ValueError(
             f"Unknown action_type '{action_type}' for {action['ticker']} on {action['ex_date']}"
@@ -49,8 +51,8 @@ def _compute_factor(action: pd.Series, ref_close: float) -> float:
 def adjust(raw_ohlcv: pd.DataFrame, corporate_actions: pd.DataFrame) -> pd.DataFrame:
     """Apply back-adjustment to raw OHLCV prices using corporate actions.
 
-    Adjusts open, high, low, and close for all five action types: cash_dividend,
-    stock_dividend, cash_and_stock_dividend, rights_issue, and capital_reduction.
+    Adjusts open, high, low, and close for all six action types: cash_dividend,
+    stock_dividend, cash_and_stock_dividend, rights_issue, capital_reduction, and stock_split.
     Volume is left unchanged. Current prices are never modified — only bars prior
     to each ex_date are scaled.
 

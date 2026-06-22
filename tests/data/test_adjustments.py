@@ -92,6 +92,19 @@ def _capital_reduction(ex_date: str, ratio: float, ticker: str = "2330") -> pd.D
     )
 
 
+def _stock_split(ex_date: str, ratio: float, ticker: str = "2330") -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime([ex_date]),
+            "ticker": [ticker],
+            "action_type": ["stock_split"],
+            "cash_amount": [float("nan")],
+            "ratio": [float(ratio)],
+            "subscription_price": [float("nan")],
+        }
+    )
+
+
 def _empty_actions() -> pd.DataFrame:
     return pd.DataFrame(
         columns=["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]
@@ -252,6 +265,38 @@ def test_capital_reduction_scales_prior_prices():
     assert result.loc[0, "close"] == pytest.approx(100.0 * 1.225)
     assert result.loc[1, "close"] == pytest.approx(100.0 * 1.225)
     assert result.loc[2, "close"] == pytest.approx(122.5)  # ex-date bar unchanged
+
+
+# ---------------------------------------------------------------------------
+# Stock split
+# ---------------------------------------------------------------------------
+
+
+def test_stock_split_scales_prior_prices():
+    # 4:1 split (ratio=0.25) on Jan 5: pre-split prices at 200 scaled down to 50.
+    raw = _ohlcv(
+        ["2023-01-03", "2023-01-04", "2023-01-05"],
+        [200.0, 200.0, 50.0],
+    )
+    actions = _stock_split("2023-01-05", ratio=0.25)
+    result = adjust(raw, actions)
+
+    assert result.loc[0, "close"] == pytest.approx(200.0 * 0.25)
+    assert result.loc[1, "close"] == pytest.approx(200.0 * 0.25)
+    assert result.loc[2, "close"] == pytest.approx(50.0)  # ex-date bar unchanged
+
+
+def test_stock_split_leaves_ex_date_bar_unchanged():
+    # The bar ON the ex_date is post-split raw price and must not be scaled.
+    raw = _ohlcv(
+        ["2023-01-03", "2023-01-04", "2023-01-05"],
+        [200.0, 200.0, 50.0],
+    )
+    actions = _stock_split("2023-01-05", ratio=0.25)
+    result = adjust(raw, actions)
+
+    assert result.loc[2, "close"] == pytest.approx(50.0)
+    assert result.loc[2, "open"] == pytest.approx(49.0)
 
 
 # ---------------------------------------------------------------------------

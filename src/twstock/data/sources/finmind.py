@@ -312,6 +312,25 @@ class FinMindSource(DataSource):
         )
         return df_red
 
+    def _build_stock_splits(self, split_data: list[dict]) -> pd.DataFrame:
+        df_raw = pd.DataFrame(split_data).sort_values("date")
+        df_split = df_raw[["date", "stock_id", "before_price", "after_price"]].copy()
+        df_split["action_type"] = "stock_split"
+        df_split["ratio"] = df_split["after_price"] / df_split["before_price"]
+        df_split["cash_amount"] = float("nan")
+        df_split["subscription_price"] = float("nan")
+        df_split = df_split.rename(columns={"date": "ex_date", "stock_id": "ticker"})[
+            ["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]
+        ].astype(
+            {
+                "ex_date": "datetime64[ns]",
+                "cash_amount": "float64",
+                "ratio": "float64",
+                "subscription_price": "float64",
+            }
+        )
+        return df_split
+
     def get_corporate_actions(self, ticker: str, start: date, end: date) -> pd.DataFrame:
         try:
             dividend_data = self._request(
@@ -326,8 +345,14 @@ class FinMindSource(DataSource):
             )
         except NoDataError:
             reduction_data = []
+        try:
+            split_data = self._request(
+                "TaiwanStockSplitPrice", {"data_id": ticker, "start_date": start}
+            )
+        except NoDataError:
+            split_data = []
 
-        if not dividend_data and not reduction_data:
+        if not dividend_data and not reduction_data and not split_data:
             return pd.DataFrame(
                 {
                     "ex_date": pd.Series(dtype="datetime64[ns]"),
@@ -344,6 +369,8 @@ class FinMindSource(DataSource):
             parts.append(self._build_dividends(dividend_data))
         if reduction_data:
             parts.append(self._build_capital_reductions(reduction_data))
+        if split_data:
+            parts.append(self._build_stock_splits(split_data))
 
         df = parts[0] if len(parts) == 1 else pd.concat(parts, ignore_index=True)
         return validate(df, CORPORATE_ACTIONS_SCHEMA)

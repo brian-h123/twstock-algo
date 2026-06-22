@@ -37,6 +37,7 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
                     "cash_and_stock_dividend",
                     "rights_issue",
                     "capital_reduction",
+                    "stock_split",
                 ]
             ),
         ),
@@ -65,6 +66,7 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
                             "cash_and_stock_dividend",
                             "rights_issue",
                             "capital_reduction",
+                            "stock_split",
                         ]
                     ),
                     "ratio",
