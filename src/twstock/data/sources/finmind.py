@@ -99,6 +99,7 @@ class FinMindSource(DataSource):
                 "ticker": pd.Series(dtype="str"),
                 "action_type": pd.Series(dtype="str"),
                 "cash_amount": pd.Series(dtype="float64"),
+                "pay_date": pd.Series(dtype="datetime64[ns]"),
                 "ratio": pd.Series(dtype="float64"),
                 "subscription_price": pd.Series(dtype="float64"),
             }
@@ -116,6 +117,7 @@ class FinMindSource(DataSource):
             ticker = raw["stock_id"]
             cash_ex = raw["CashExDividendTradingDate"]
             stock_ex = raw["StockExDividendTradingDate"]
+            pay_date = raw["CashDividendPaymentDate"]
 
             if raw["year"] == "不適用" and not has_rights:
                 continue
@@ -137,6 +139,7 @@ class FinMindSource(DataSource):
                 rights_sub = float("nan")
 
             nan = float("nan")
+            nan_date = pd.NaT
 
             if has_cash and has_stock and not has_rights:
                 if cash_ex != stock_ex:
@@ -152,6 +155,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "cash_and_stock_dividend",
                         "cash_amount": cash_total,
+                        "pay_date": pay_date,
                         "ratio": stock_face_total / 10,
                         "subscription_price": nan,
                     }
@@ -163,6 +167,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "cash_dividend",
                         "cash_amount": cash_total,
+                        "pay_date": pay_date,
                         "ratio": nan,
                         "subscription_price": nan,
                     }
@@ -174,6 +179,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "stock_dividend",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": stock_face_total / 10,
                         "subscription_price": nan,
                     }
@@ -185,6 +191,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "cash_dividend",
                         "cash_amount": cash_total,
+                        "pay_date": pay_date,
                         "ratio": nan,
                         "subscription_price": nan,
                     }
@@ -195,6 +202,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "rights_issue",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": rights_ratio,
                         "subscription_price": rights_sub,
                     }
@@ -206,6 +214,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "stock_dividend",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": stock_face_total / 10,
                         "subscription_price": nan,
                     }
@@ -216,6 +225,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "rights_issue",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": rights_ratio,
                         "subscription_price": rights_sub,
                     }
@@ -232,6 +242,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "cash_dividend",
                         "cash_amount": cash_total,
+                        "pay_date": pay_date,
                         "ratio": nan,
                         "subscription_price": nan,
                     }
@@ -242,6 +253,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "stock_dividend",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": stock_face_total / 10,
                         "subscription_price": nan,
                     }
@@ -252,6 +264,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "rights_issue",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": rights_ratio,
                         "subscription_price": rights_sub,
                     }
@@ -264,6 +277,7 @@ class FinMindSource(DataSource):
                         "ticker": ticker,
                         "action_type": "rights_issue",
                         "cash_amount": nan,
+                        "pay_date": nan_date,
                         "ratio": rights_ratio,
                         "subscription_price": rights_sub,
                     }
@@ -276,10 +290,21 @@ class FinMindSource(DataSource):
             {
                 "ex_date": "datetime64[ns]",
                 "cash_amount": "float64",
+                "pay_date": "datetime64[ns]",
                 "ratio": "float64",
                 "subscription_price": "float64",
             }
-        )[["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]]
+        )[
+            [
+                "ex_date",
+                "ticker",
+                "action_type",
+                "cash_amount",
+                "pay_date",
+                "ratio",
+                "subscription_price",
+            ]
+        ]
 
     def _build_capital_reductions(self, reduction_data: list[dict]) -> pd.DataFrame:
         df_raw = pd.DataFrame(reduction_data)
@@ -299,13 +324,23 @@ class FinMindSource(DataSource):
             df_red["PostReductionReferencePrice"] / df_red["ClosingPriceonTheLastTradingDay"]
         )
         df_red["cash_amount"] = float("nan")
+        df_red["pay_date"] = pd.NaT
         df_red["subscription_price"] = float("nan")
         df_red = df_red.rename(columns={"date": "ex_date", "stock_id": "ticker"})[
-            ["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]
+            [
+                "ex_date",
+                "ticker",
+                "action_type",
+                "cash_amount",
+                "pay_date",
+                "ratio",
+                "subscription_price",
+            ]
         ].astype(
             {
                 "ex_date": "datetime64[ns]",
                 "cash_amount": "float64",
+                "pay_date": "datetime64[ns]",
                 "ratio": "float64",
                 "subscription_price": "float64",
             }
@@ -318,13 +353,23 @@ class FinMindSource(DataSource):
         df_split["action_type"] = "stock_split"
         df_split["ratio"] = df_split["after_price"] / df_split["before_price"]
         df_split["cash_amount"] = float("nan")
+        df_split["pay_date"] = pd.NaT
         df_split["subscription_price"] = float("nan")
         df_split = df_split.rename(columns={"date": "ex_date", "stock_id": "ticker"})[
-            ["ex_date", "ticker", "action_type", "cash_amount", "ratio", "subscription_price"]
+            [
+                "ex_date",
+                "ticker",
+                "action_type",
+                "cash_amount",
+                "pay_date",
+                "ratio",
+                "subscription_price",
+            ]
         ].astype(
             {
                 "ex_date": "datetime64[ns]",
                 "cash_amount": "float64",
+                "pay_date": "datetime64[ns]",
                 "ratio": "float64",
                 "subscription_price": "float64",
             }
@@ -359,6 +404,7 @@ class FinMindSource(DataSource):
                     "ticker": pd.Series(dtype="str"),
                     "action_type": pd.Series(dtype="str"),
                     "cash_amount": pd.Series(dtype="float64"),
+                    "pay_date": pd.Series(dtype="datetime64[ns]"),
                     "ratio": pd.Series(dtype="float64"),
                     "subscription_price": pd.Series(dtype="float64"),
                 }

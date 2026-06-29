@@ -197,6 +197,7 @@ def _make_ca(ticker="2330", ex_dates=("2023-07-01",), action_type="cash_dividend
             "ticker": [ticker] * n,
             "action_type": [action_type] * n,
             "cash_amount": [3.0] * n,
+            "pay_date": pd.to_datetime(["2023-08-01"] * n),
             "ratio": [float("nan")] * n,
             "subscription_price": [float("nan")] * n,
         }

@@ -38,6 +38,7 @@ def test_full_backfill_one_ticker(source):
         "ticker",
         "action_type",
         "cash_amount",
+        "pay_date",
         "ratio",
         "subscription_price",
     }.issubset(df_actions.columns)

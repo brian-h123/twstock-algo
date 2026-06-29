@@ -42,6 +42,7 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
             ),
         ),
         "cash_amount": Column(pa.Float64, Check.ge(0), nullable=True),
+        "pay_date": Column(pa.DateTime, nullable=True),
         "ratio": Column(pa.Float64, Check.greater_than(0), nullable=True),
         "subscription_price": Column(pa.Float64, Check.greater_than(0), nullable=True),
     },
@@ -75,6 +76,16 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
                 .all()
             ),
             error="ratio required for all action_types except cash_dividend",
+        ),
+        Check(
+            lambda df: (
+                df.loc[
+                    df["action_type"].isin(["cash_dividend", "cash_and_stock_dividend"]), "pay_date"
+                ]
+                .notna()
+                .all()
+            ),
+            error="pay_date required for cash_dividend and cash_and_stock_dividend",
         ),
         Check(
             lambda df: (
