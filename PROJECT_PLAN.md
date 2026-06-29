@@ -2,8 +2,8 @@
 
 > **Purpose of this document.** A single reference covering project goals, locked decisions, and the full phase plan. Designed to be pasted into new Claude chats so any conversation can pick up project context without re-explaining everything. Updated at the end of each phase.
 
-**Last updated:** 2026-06-22
-**Current phase:** Phase 5 — Paper-Trading Simulator (Phase 4 complete; see `journal/phase_4_retro.md`)
+**Last updated:** 2026-06-27
+**Current phase:** Phase 5 — Paper-Trading Simulator (planning complete: `PHASE_5.md` + ADRs 0008/0009/0010 finalized; implementation pending. Phase 4 complete; see `journal/phase_4_retro.md`)
 **Repo:** `twstock-algo` (private GitHub)
 
 ---
@@ -28,7 +28,7 @@ Do not relitigate without explicit reason. If a future phase requires changing o
 
 | Area | Decision |
 |---|---|
-| Time horizon | Daily only (intraday is a Phase 9+ expansion) |
+| Time horizon | Daily only (intraday is the Phase 9 expansion) |
 | Universe | TWSE Top 50 (0050 ETF constituents), hard-coded snapshot |
 | Capital | NT$1,000,000, max 10% per position |
 | Language | Python 3.12 |
@@ -45,7 +45,7 @@ Do not relitigate without explicit reason. If a future phase requires changing o
 | Data: primary | FinMind (free tier) |
 | Data: fallback | TWSE official |
 | Frontend | Streamlit + Plotly |
-| Backtester | vectorbt (provisional, confirm at Phase 3 kickoff) |
+| Backtester | Custom event-driven engine (resolved Phase 3 kickoff, ADR 0004; vectorbt evaluated and rejected) |
 | Broker (paper) | Self-built simulator |
 | Broker (live) | Fubon Neo API (Sinopac/Shioaji as backup) |
 | License | MIT |
@@ -152,7 +152,7 @@ Estimates assume 4–5 hours/day, 5–6 days/week. Padding included; expect slip
 ### Phase 4 — Technical Strategies
 **Goal:** implement and honestly evaluate 5–10 classical strategies, document which (if any) beat buy-and-hold after costs.
 **Duration:** 2–3 weeks.
-**Builds:** strategies — at minimum: SMA crossover, EMA crossover, RSI mean-reversion, Bollinger Band breakout, momentum (top-N), pairs trading on 2 correlated names, MACD, donchian breakout. Each with a tear sheet and a 1-page writeup.
+**Builds:** strategies — SMA crossover, EMA crossover, RSI mean-reversion, Bollinger Band breakout, MACD, donchian breakout (six single-asset), plus a cross-sectional momentum (top-N) strategy. Each with a tear sheet and a 1-page writeup. **Pairs trading was deferred** (its multi-leg execution — atomic legs + FOK — is built in Phase 11; see the roadmap beyond Phase 8).
 **Exit when:** at least 6 strategies fully evaluated with tear sheets and writeups in `journal/strategies/`. Consolidated comparison table built.
 
 **Key decisions at kickoff:**
@@ -169,22 +169,25 @@ Estimates assume 4–5 hours/day, 5–6 days/week. Padding included; expect slip
 ---
 
 ### Phase 5 — Paper-Trading Simulator
-**Goal:** a paper-trading layer that takes signals from a Phase 4 strategy and simulates execution with realistic Taiwan-market fills, runnable in real-time alongside live market data.
-**Duration:** 1–2 weeks.
+**Goal:** a paper-trading layer that takes signals from a Phase 4 strategy and simulates execution with realistic Taiwan-market frictions, built as the pessimistic configuration of one shared execution core (the backtester is the frictionless configuration). Primary evaluation is multi-year historical replay; a live-data run is a connectivity smoke test, not real-time trading.
+**Duration:** 2–3 weeks (the biggest phase so far). **Spec:** `PHASE_5.md`; **ADRs:** 0008 (shared core), 0009 (settlement + cash), 0010 (order lifecycle).
 **Builds:**
-- `BrokerSimulator` class implementing a clean broker interface (place/cancel/query orders, account state)
-- Pessimistic fill model: assume worse side of bid-ask, volume-aware slippage, occasional rejections
-- Order book simulation: open/cancel/fill state machine
-- Real-time loop: pull live market data (from Fubon market data API or FinMind real-time tier), evaluate strategy, send orders to simulator, log everything
-- Run one Phase 4 strategy live-paper for 2+ weeks; produce daily P&L tracking
-- Optional: parallel run on Sinopac paper account if available, for cross-validation
+- `BrokerSimulator` implementing an event-stream `BrokerBase` interface (`submit`/`cancel`/`query`/`drain_events`) — the seam the Phase 8 live adapter will also implement
+- Order-lifecycle state machine with an enumerable transition contract and hard illegal-edge guards
+- Pessimistic volume-participation fill model on **trailing ADV as of T** (lookahead-safe at the T+1 open); swappable, with a full-fill frictionless preset
+- Dated settlement ledger with three swappable modes (`Instant` control, `Netting` canonical, `SettledCashOnly` pessimism); T+2 settlement, dividends at pay-date
+- Rejection taxonomy: `NO_MARKET_DATA` detection (foundational) + an evidence-gated `SUSPENSION` enrichment from the TWTAWU suspension calendar
+- Event-sourced JSONL log whose order-independent, idempotent fold *is* the account state
+- Independent-oracle test suite (O1–O10) for correctness, plus an attribution reconciliation report against the frictionless backtester
+- A ~14-session live-data connectivity smoke test (EOD poll); optional Sinopac paper cross-check
 
-**Exit when:** simulator runs continuously for 2 weeks without crashing; daily P&L is logged; a reconciliation report compares simulator results vs Phase 3 backtest output for the same period (they should be close but not identical).
+**Exit when:** the simulator runs a Phase 4 strategy end-to-end over multi-year replay; the **O1–O10 oracle suite passes** (the correctness gate); the reconciliation report attributes the sim-vs-backtest gap by friction cause; and the live connectivity smoke test runs ~14 sessions without crashing. (Full exit criteria in `PHASE_5.md §8`.)
 
-**Key decisions at kickoff:**
-- Real-time data source: Fubon Neo market API (no orders sent), FinMind, or polling TWSE?
-- Logging strategy: SQLite, JSONL, what?
-- How to model partial fills?
+**Key decisions at kickoff — resolved** (see `PHASE_5.md` + ADRs 0008/0009/0010):
+- Real-time data source → EOD poll (FinMind after ~17:30); the live run is a connectivity smoke test, with historical replay as the primary gate.
+- Logging → event-sourced JSONL; state is a fold over the log (SQLite rejected once the live run was demoted to a smoke test).
+- Partial fills → submit-and-partial-fill (not pre-screen/clamp); the broker enforces reality at the execution moment.
+- Correctness → independent oracles, not engine-reproduces-engine; reconciliation is an attribution instrument, not a correctness proof.
 
 **Pitfalls:**
 - **Self-deception.** A simulator can be made to confirm any backtest. Make it pessimistic on purpose.
@@ -285,17 +288,23 @@ Estimates assume 4–5 hours/day, 5–6 days/week. Padding included; expect slip
 
 ---
 
-### Phase 9+ — Future Expansions
+### Beyond Phase 8 — Sequenced Roadmap
 
-Not committed; placeholders for after Phase 8 stabilizes:
+Committed in order but tentative in detail; each phase gets its own spec at kickoff, and the sequence may be revisited once Phase 8 stabilizes. The ordering logic: clear deferred debt, then build execution depth and data breadth (foundational, unlock everything downstream), then add alpha sources, then get smarter at allocating over them, then take on an entirely new instrument class.
 
-- Intraday horizon (minute bars, intraday strategies)
-- Universe expansion beyond Top 50 (TWSE all + TPEx)
-- Futures and options
-- Portfolio optimization (mean-variance, risk parity, Black-Litterman)
-- Event-driven strategies (earnings announcements, ex-dividend)
-- Reinforcement learning approaches
-- Cross-market signals (US futures overnight, etc.)
+**Cleanup (between Phase 8 and Phase 9) — Backtester migration onto the shared core.** Deferred from Phase 5 (`ADR 0008`), non-blocking, result-neutral. Done before Phase 9 because intraday is the first work to lean hard on a single unified core — clear the debt before building more on it.
+
+**Phase 9 — Intraday Horizon.** Minute bars; the across-the-bar execution-timing preset (the seam built in Phase 5); real order-book matching (FIFO/pro-rata) behind that same fill seam; intraday strategies. Foundational execution-depth work with ~80% core reuse; the number is already committed in `PHASE_5.md` and ADRs 0008/0010.
+
+**Phase 10 — Universe Expansion (TWSE-all).** Expand from the Top-50 snapshot to TWSE-all with **point-in-time membership**, finally killing the survivorship bias flagged since Phase 1. Scoped to TWSE-all only (TPEx deferred — 1000+ TWSE names is already a large step, and adding TPEx at the same time risks compounding bugs). High-priority and foundational: a bigger, bias-free universe improves every later phase.
+
+**Phase 11 — Strategy & Signal Breadth.** Extends Phase 4 strategies and Phase 7 alt-data: event-driven strategies (earnings, ex-dividend); cross-market signals (US futures overnight, etc.); and pairs trading / multi-leg — the latter requiring the atomic-leg + FOK execution that Phase 5 deliberately deferred. The coherent "more alpha sources" phase.
+
+**Phase 12 — Advanced Allocation.** Portfolio optimization (mean-variance, risk parity, Black-Litterman) replacing the fixed max-10% / equal-weight sizing with a classical convex baseline. Honest-evaluation framing: does the optimizer beat naive equal-weight after costs?
+
+**Phase 13 — Reinforcement Learning.** A learned allocation/execution policy, attempted only once the realistic simulator, the bias-free universe, and the richer signals all exist — the riskiest and most exploratory direction, kept as its own focused phase rather than bundled with classical allocation. Framing: does the learned policy beat the convex optimum of Phase 12?
+
+**Phase 14 — Futures & Options.** A new asset class (margin, greeks, contract rolls) — the biggest lift and lowest near-term priority, so it lands last.
 
 ---
 
@@ -309,7 +318,7 @@ Things that span all phases and don't belong to any single one:
 
 **Cost discipline.** Total project budget should be <NT$1000/month for data + hosting through Phase 7. Phase 8 may add VPS costs.
 
-**Survivorship bias.** Acknowledged in every backtest report until Phase 9 expands universe handling.
+**Survivorship bias.** Acknowledged in every backtest report until Phase 10 expands universe handling (point-in-time membership).
 
 **Document hygiene.** `CLAUDE.md`, this file, and per-phase specs stay in sync. When in doubt, this document is the source of truth for *intent*; `CLAUDE.md` is the source of truth for *current state*.
 
@@ -357,9 +366,18 @@ based on what I learned, (2) produce a brief retrospective, and
 | 2 — Dashboard | Done | 2026-05-20 | 2026-05-21 | All exit criteria met; 31 new tests (160 total); all 50 tickers render in <2s warm. Retro: `journal/phase_2_retro.md`. |
 | 3 — Backtester | Done | 2026-05-30 | 2026-06-13 | Custom thin engine; T+1 execution; Taiwan cost model; `WalkForwardSplit`; SMA crossover reference strategy; full tear sheet. Retro: `journal/phase_3_retro.md`. |
 | 4 — Technical strategies | Done | 2026-06-14 | 2026-06-22 | 6 single-asset strategies + CrossSectionalMomentum; portfolio runner (ADR 0005/0006); ~310 tests passing. Retro: `journal/phase_4_retro.md`. Pre-Phase-5: ADR 0007 stock split fix. |
-| 5 — Paper sim | Pending | — | — | — |
+| 5 — Paper sim | Planning done | — | — | Spec + ADRs 0008/0009/0010 finalized; `phase_5_references.md` (Step 0 reading) complete. Implementation pending. |
 | 6 — ML strategies | Pending | — | — | — |
 | 7 — Alt data | Pending | — | — | — |
 | 8 — Production + live | Pending | — | — | — |
+| — Backtester migration (cleanup) | Pending | — | — | Deferred from Phase 5 (`ADR 0008`); result-neutral; do before Phase 9 |
+| 9 — Intraday horizon | Pending | — | — | Minute bars; across-the-bar fill preset; order-book matching |
+| 10 — Universe expansion (TWSE-all) | Pending | — | — | Point-in-time membership; ends survivorship bias; TPEx deferred |
+| 11 — Strategy & signal breadth | Pending | — | — | Event-driven, cross-market, pairs/multi-leg (atomic-leg + FOK execution) |
+| 12 — Advanced allocation | Pending | — | — | Portfolio optimization (mean-variance, risk parity, Black-Litterman) |
+| 13 — Reinforcement learning | Pending | — | — | Learned allocation/execution policy; own focused phase |
+| 14 — Futures & options | Pending | — | — | New asset class (margin, greeks, rolls); lowest near-term priority |
+
+Phases 9+ are committed in sequence but tentative in detail; revisit after Phase 8.
 
 Update this table at every phase transition.

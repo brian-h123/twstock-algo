@@ -3,7 +3,7 @@
 Instructions for Claude Code when working in this repository. Read this in full at the start of every session, plus the current week's journal entry in `journal/weekly/`.
 
 **Last updated:** 2026-06-22
-**Current phase:** Phase 5 — Paper-Trading Simulator (Phase 4 complete; see `journal/phase_4_retro.md`)
+**Current phase:** Phase 5 — Paper-Trading Simulator (planning complete: `PHASE_5.md` + ADRs 0008/0009/0010 finalized; implementation pending. Phase 4 complete; see `journal/phase_4_retro.md`)
 
 ---
 
@@ -28,7 +28,7 @@ These were decided in the planning workspace and should not be changed without a
 
 | Area                   | Decision                                                                                                                                                                                                                                                                                                         |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Time horizon           | Daily only. Intraday is a future Phase 9+ expansion.                                                                                                                                                                                                                                                             |
+| Time horizon           | Daily only. Intraday is a future Phase 9 expansion.                                                                                                                                                                                                                                                             |
 | Universe               | TWSE Top 50 (0050 ETF constituents), hard-coded snapshot for now                                                                                                                                                                                                                                                 |
 | Capital assumption     | NT$1,000,000 for backtests; max 10% per position                                                                                                                                                                                                                                                                 |
 | Python                 | 3.12                                                                                                                                                                                                                                                                                                             |
@@ -164,6 +164,7 @@ twstock-algo/
 │   ├── weekly/
 │   ├── decisions/
 │   ├── phase_3_references.md    ← vectorbt + backtrader study notes (Phase 3)
+│   ├── phase_5_references.md    ← broker/order/fill Step-0 source reading (Phase 5)
 │   ├── strategies/              ← Phase 4 per-strategy writeups + comparison.md
 │   └── dependencies.md          ← rationale for each new dep
 └── scripts/
@@ -219,7 +220,7 @@ Returned DataFrames must conform to the schemas in `src/twstock/data/schemas.py`
 
 - Phase 4 — Technical Strategies (closed 2026-06-22). Six single-asset strategies + `CrossSectionalMomentum`; portfolio runner with `CrossSectionalStrategy` ABC, `EqualWeightTopN` allocator, `Monthly` rebalance, `reconcile()`, lot-based FIFO ledger. ~310 tests passing. Retro: `journal/phase_4_retro.md`. Pre-Phase-5 prerequisite: ADR 0007 stock split fix.
 
-**Active:** Phase 5 — Paper-Trading Simulator. Full spec: `PHASE_5.md`.
+**Active:** Phase 5 — Paper-Trading Simulator. Planning complete; implementation pending. Spec: `PHASE_5.md`. Governing ADRs: 0008 (shared execution core), 0009 (settlement modes + cash allocation), 0010 (order lifecycle, broker interface, fill model). Step-0 source reading: `journal/phase_5_references.md`.
 
 **Public API surface for downstream phases** (frozen at end of Phase 1; Phase 2 and Phase 3 import from here only):
 
@@ -281,7 +282,7 @@ from twstock.strategies.cross_sectional_momentum import CrossSectionalMomentum
 - **Do not encode return-predictive signal in a `TieBreakPolicy`, `Allocator`, or `RebalanceSchedule`.** Alpha belongs in `generate_scores`, where the lookahead audit covers it; a tiebreak/allocator/cadence rule that ranks on expected return is unaudited alpha. Decision: ADR 0006 (§6). Code-review check.
 - **Do not buy before selling on a rebalance bar.** The reconciler emits all sells before all buys (ADR 0005); buying first silently under-invests when a rotation funds a buy from a same-bar sell.
 - **Do not optimize strategy parameters for selection.** Canonical parameters are fixed by convention; `WalkForwardSplit` is a diagnostic only (`PHASE_4.md` D2). Reporting an in-sample-optimized number as the result is disqualifying.
-- **Do not add short positions, partial fills, or limit orders in Phase 4.** All-or-nothing, long-only, market orders only; these are Phase 5 (ADR 0005/0006 scope).
+- **Do not add short positions, partial fills, or limit orders in Phase 4.** All-or-nothing, long-only, market orders only. Of these, only **partial fills** arrive in Phase 5 (ADR 0010); short positions and limit orders are deferred to later phases (Phase 5 is long-only, market-orders-only).
 - **Do not import from `twstock.data.sources`, `twstock.data.adjustments`, `twstock.data.quality`, or `twstock.ui` into `src/twstock/strategies/`.** Strategies depend only on `twstock.backtest`, the indicators, the public data API, the universe, and config. Same Phase 8 import-linter ticket covers this boundary.
 - Do not regenerate `tests/fixtures/anchor_dividends.json` from CI, pre-commit, or test setup. The committed JSON is the source of truth at test time. Regenerate only by running `scripts/build_anchors.py` deliberately, and only when the dividend reference table inside that script has been edited. Any regeneration must be reviewed in a commit diff alongside the dividend-table edit that justified it.
 - Do not auto-re-record VCR cassettes in CI or pre-commit. Re-record manually and review the diff.
