@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 import pytest
 
@@ -7,28 +9,28 @@ from twstock.backtest.portfolio import InsufficientCashError, Portfolio, Trade
 CAPITAL = 1_000_000.0
 TS = pd.Timestamp("2024-01-02 09:00:00")
 
-# Pre-computed expected values for default TaiwanCostModel
+# Pre-computed expected values for default TaiwanCostModel (floor rounding applied)
 # Buy: ticker="2330", shares=1000, reference_price=100.0
 #   fill_price = 100.0 * (1 + 5/10000) = 100.05
 #   notional   = 1000 * 100.05 = 100_050.0
-#   commission = 100_050 * (0.001425 * 0.6) = 100_050 * 0.000855 = 85.54275
-#   total_cash_out = 100_050 + 85.54275 = 100_135.54275
-#   avg_cost       = 100_135.54275 / 1000 = 100.13554275
+#   commission = floor(100_050 * 0.000855) = floor(85.54275) = 85
+#   total_cash_out = 100_050 + 85 = 100_135
+#   avg_cost       = 100_135 / 1000 = 100.135
 BUY_FILL = 100.05
-BUY_COMM = 85.54275
-BUY_TOTAL = 100_135.54275
-BUY_AVG = 100.13554275
+BUY_COMM = 85
+BUY_TOTAL = 100_135
+BUY_AVG = 100.135
 
 # Sell: ticker="2330", shares=1000, reference_price=110.0
 #   fill_price = 110.0 * (1 - 5/10000) = 109.945
 #   notional   = 1000 * 109.945 = 109_945.0
-#   commission = 109_945 * 0.000855 = 94.002975
-#   tax        = 109_945 * 0.003   = 329.835
-#   total_cash_in = 109_945 - 94.002975 - 329.835 = 109_521.162025
+#   commission = floor(109_945 * 0.000855) = floor(94.002975) = 94
+#   tax        = floor(109_945 * 0.003)    = floor(329.835)   = 329
+#   total_cash_in = 109_945 - 94 - 329 = 109_522
 SELL_FILL = 109.945
-SELL_COMM = 94.002975
-SELL_TAX = 329.835
-SELL_IN = 109_521.162025
+SELL_COMM = 94
+SELL_TAX = 329
+SELL_IN = 109_522
 
 
 @pytest.fixture
@@ -61,12 +63,13 @@ class TestBuy:
         assert portfolio.positions["2330"].shares == 1500
 
     def test_adds_to_existing_position_avg_cost(self, portfolio):
-        # Second buy: fill=105.0525, notional=52526.25, commission=44.90994375
-        # total_cash_out_2 = 52571.15994375
-        # new_avg_cost = (1000 * BUY_AVG + 52571.15994375) / 1500
+        # Second buy: fill=105.0525, notional=52526.25, commission=floor(44.91)=44
+        # total_cash_out_2 = 52526.25 + 44 = 52570.25
+        # new_avg_cost = (1000 * BUY_AVG + 52570.25) / 1500
         portfolio.buy("2330", 1000, 100.0, TS)
         portfolio.buy("2330", 500, 105.0, TS)
-        total_cost_2 = 500 * 105.0 * 1.0005 + 500 * 105.0525 * 0.000855
+        notional_2 = 500 * 105.0 * 1.0005
+        total_cost_2 = notional_2 + math.floor(notional_2 * 0.000855)
         expected = (1000 * BUY_AVG + total_cost_2) / 1500
         assert portfolio.positions["2330"].avg_cost == pytest.approx(expected, rel=1e-9)
 
@@ -141,8 +144,8 @@ class TestSell:
         # ETF tax is 0.1% vs stock 0.3%
         portfolio.buy("0050", 1000, 100.0, TS)
         trade = portfolio.sell("0050", 1000, 110.0, TS)
-        # fill_price = 109.945, notional = 109_945, etf_tax = 109_945 * 0.001
-        assert trade.tax == pytest.approx(109_945 * 0.001, rel=1e-9)
+        # fill_price = 109.945, notional = 109_945, etf_tax = floor(109_945 * 0.001) = 109
+        assert trade.tax == math.floor(109_945 * 0.001)
 
     def test_sell_total_cost_is_commission_plus_tax(self, portfolio):
         portfolio.buy("2330", 1000, 100.0, TS)
