@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from twstock.backtest.trades import Grouping, Matching, build_round_trips
+from twstock.backtest.trades import Grouping, LotLedger, Matching, Side, build_round_trips
 
 _TRADES_COLS = [
     "timestamp",
@@ -349,3 +349,168 @@ class TestCostAdjusted:
         assert result.iloc[0]["entry_price"] == pytest.approx(100.0)
         assert result.iloc[0]["exit_price"] == pytest.approx(110.0)
         assert result.iloc[0]["ret"] == pytest.approx(0.10)
+
+
+# ── LotLedger.open_shares ────────────────────────────────────────────────────
+
+
+class TestLotLedgerOpenShares:
+    def test_starts_at_zero(self):
+        assert LotLedger().open_shares == 0
+
+    def test_buy_increments(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        assert ledger.open_shares == 1000
+
+    def test_partial_sell_decrements(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=400, price=110.0, cost=0.0)
+        assert ledger.open_shares == 600
+
+    def test_full_close_reaches_zero(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=1000, price=110.0, cost=0.0)
+        assert ledger.open_shares == 0
+
+
+# ── LotLedger.avg_cost ───────────────────────────────────────────────────────
+
+
+class TestLotLedgerAvgCost:
+    def test_none_when_flat(self):
+        assert LotLedger().avg_cost is None
+
+    def test_single_lot_no_cost(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        assert ledger.avg_cost == pytest.approx(100.0)
+
+    def test_buy_cost_raises_basis(self):
+        # Buy 1000 @ 100 with commission=85.5 → basis = (100_000 + 85.5) / 1000
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=85.5)
+        assert ledger.avg_cost == pytest.approx(100.0855)
+
+    def test_two_lots_weighted_average(self):
+        # 500 @ 100 + 500 @ 110 → avg = 105
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=500, price=100.0, cost=0.0)
+        ledger.on_fill(Side.BUY, shares=500, price=110.0, cost=0.0)
+        assert ledger.avg_cost == pytest.approx(105.0)
+
+    def test_none_after_full_close(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=1000, price=110.0, cost=0.0)
+        assert ledger.avg_cost is None
+
+    def test_partial_sell_reflects_remaining_lots(self):
+        # FIFO sell 500 from (500@100, 500@110) → lot A consumed → remaining avg = 110
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=500, price=100.0, cost=0.0)
+        ledger.on_fill(Side.BUY, shares=500, price=110.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=120.0, cost=0.0)
+        assert ledger.avg_cost == pytest.approx(110.0)
+
+
+# ── LotLedger.round_trips ────────────────────────────────────────────────────
+
+
+class TestLotLedgerRoundTrips:
+    def test_no_sells_returns_empty(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        assert ledger.round_trips() == []
+
+    def test_open_position_flat_to_flat_returns_empty(self):
+        # Partial sell leaves lifecycle open → FLAT_TO_FLAT emits nothing.
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=110.0, cost=0.0)
+        assert ledger.round_trips(Grouping.FLAT_TO_FLAT) == []
+
+    def test_flat_to_flat_single_lifecycle(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=1000, price=110.0, cost=0.0)
+        result = ledger.round_trips(Grouping.FLAT_TO_FLAT)
+        assert len(result) == 1
+        assert result[0]["entry_price"] == pytest.approx(100.0)
+        assert result[0]["exit_price"] == pytest.approx(110.0)
+        assert result[0]["shares"] == 1000
+        assert result[0]["ret"] == pytest.approx(0.10)
+
+    def test_flat_to_flat_two_partial_sells_one_row(self):
+        # 1 buy, 2 partial sells close the position → 1 row with weighted exit.
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=110.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=120.0, cost=0.0)
+        result = ledger.round_trips(Grouping.FLAT_TO_FLAT)
+        assert len(result) == 1
+        # exit_price = (500 * 110 + 500 * 120) / 1000 = 115
+        assert result[0]["exit_price"] == pytest.approx(115.0)
+        assert result[0]["ret"] == pytest.approx(0.15)
+
+    def test_flat_to_flat_two_sequential_lifecycles(self):
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=1000, price=110.0, cost=0.0)
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=1000, price=90.0, cost=0.0)
+        result = ledger.round_trips(Grouping.FLAT_TO_FLAT)
+        assert len(result) == 2
+        assert result[0]["ret"] == pytest.approx(0.10)
+        assert result[1]["ret"] == pytest.approx(-0.10)
+
+    def test_fill_to_fill_one_row_per_sell(self):
+        # 1 buy, 2 partial sells → 2 rows regardless of open/closed state.
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=110.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=120.0, cost=0.0)
+        result = ledger.round_trips(Grouping.FILL_TO_FILL)
+        assert len(result) == 2
+        assert result[0]["ret"] == pytest.approx(0.10)
+        assert result[1]["ret"] == pytest.approx(0.20)
+
+    def test_fill_to_fill_emits_row_with_open_position(self):
+        # FILL_TO_FILL does not require the lifecycle to be closed.
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=110.0, cost=0.0)
+        assert len(ledger.round_trips(Grouping.FILL_TO_FILL)) == 1
+
+    def test_same_ledger_two_groupings(self):
+        # Same closed slices, different grouping → different row counts.
+        ledger = LotLedger()
+        ledger.on_fill(Side.BUY, shares=1000, price=100.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=110.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=120.0, cost=0.0)
+        assert len(ledger.round_trips(Grouping.FLAT_TO_FLAT)) == 1
+        assert len(ledger.round_trips(Grouping.FILL_TO_FILL)) == 2
+
+
+# ── LotLedger LIFO matching ──────────────────────────────────────────────────
+
+
+class TestLotLedgerLIFO:
+    def test_lifo_consumes_newest_lot_first(self):
+        ledger = LotLedger(matching=Matching.LIFO)
+        ledger.on_fill(Side.BUY, shares=500, price=100.0, cost=0.0)  # lot A (older)
+        ledger.on_fill(Side.BUY, shares=500, price=110.0, cost=0.0)  # lot B (newer)
+        ledger.on_fill(Side.SELL, shares=500, price=120.0, cost=0.0)  # consumes lot B
+        result = ledger.round_trips(Grouping.FILL_TO_FILL)
+        assert result[0]["entry_price"] == pytest.approx(110.0)
+        assert result[0]["ret"] == pytest.approx(120.0 / 110.0 - 1)
+
+    def test_lifo_avg_cost_reflects_remaining_older_lot(self):
+        # After consuming the newer lot, only lot A (100.0) remains.
+        ledger = LotLedger(matching=Matching.LIFO)
+        ledger.on_fill(Side.BUY, shares=500, price=100.0, cost=0.0)
+        ledger.on_fill(Side.BUY, shares=500, price=110.0, cost=0.0)
+        ledger.on_fill(Side.SELL, shares=500, price=120.0, cost=0.0)
+        assert ledger.avg_cost == pytest.approx(100.0)
