@@ -28,6 +28,15 @@ class Order:
     tif: TimeInForce = TimeInForce.IOC
 
 
+@dataclass(frozen=True)
+class OrderState:
+    order_id: OrderId
+    status: OrderStatus
+    filled_quantity: int
+    remaining_quantity: int
+    avg_fill_price: float | None
+
+
 LEGAL_TRANSITIONS: frozenset[tuple[OrderStatus, OrderStatus]] = frozenset(
     {
         (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED),
