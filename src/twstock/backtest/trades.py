@@ -94,6 +94,24 @@ class LotLedger:
             if self._open_shares == 0:
                 self._generation += 1
 
+    def on_split(self, ratio: float) -> None:
+        """Apply a stock split to all open lots.
+
+        Each lot's share count is adjusted by ``round(shares * ratio)``
+        and its cost basis by ``basis / ratio``. ``_open_shares`` is
+        recomputed from the rounded lot totals. A no-op when the deque
+        is empty.
+
+        Args:
+            ratio: New shares per old share (e.g. 2.0 for a 2-for-1 split).
+        """
+        open_shares = 0
+        for lot in self._lot_deque:
+            lot.shares = round(lot.shares * ratio)
+            lot.basis = lot.basis / ratio
+            open_shares += lot.shares
+        self._open_shares = open_shares
+
     @property
     def open_shares(self) -> int:
         """Total shares currently held in open lots."""

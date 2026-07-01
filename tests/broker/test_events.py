@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from twstock.broker.account import Account, fold
 from twstock.broker.events import (
     ActionType,
     Bar,
@@ -15,6 +16,7 @@ from twstock.broker.events import (
     OrderId,
     Side,
 )
+from twstock.broker.settlement import InstantSettlement
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -199,3 +201,74 @@ def test_side_re_exported_from_events_module():
     """Downstream broker modules import Side from events without knowing its origin."""
     assert Side.BUY.value == "buy"
     assert Side.SELL.value == "sell"
+
+
+# ── O10 fold idempotence ──────────────────────────────────────────────────────
+
+
+def _fresh_account() -> Account:
+    return Account(initial_capital=Decimal("1000000"), settlement=InstantSettlement())
+
+
+def _buy_event(order_id: str, ticker: str, shares: int, price: str) -> list[BrokerEvent]:
+    t = date(2026, 7, 1)
+    return [
+        BrokerEvent(
+            ts=t,
+            kind=EventKind.SUBMITTED,
+            order_id=OrderId(order_id),
+            payload={"quantity": str(shares)},
+        ),
+        BrokerEvent(
+            ts=t,
+            kind=EventKind.FILL,
+            order_id=OrderId(order_id),
+            payload={
+                "ticker": ticker,
+                "side": "buy",
+                "shares": str(shares),
+                "fill_price": price,
+                "total_cost": "0",
+            },
+        ),
+    ]
+
+
+class TestO10FoldIdempotence:
+    """O10: replay (and commutative reorder) of the log → identical final state."""
+
+    def test_determinism_same_events_same_state(self):
+        events = _buy_event("o1", "2330", 1000, "500")
+        acc1 = fold(events, _fresh_account())
+        acc2 = fold(events, _fresh_account())
+        assert acc1._ledger.settled_cash == acc2._ledger.settled_cash
+        assert acc1.positions["2330"].open_shares == acc2.positions["2330"].open_shares
+        assert acc1._orders[OrderId("o1")].status == acc2._orders[OrderId("o1")].status
+
+    def test_commutative_fills_for_different_tickers_produce_same_state(self):
+        events_ab = _buy_event("a", "2330", 1000, "500") + _buy_event("b", "2317", 500, "100")
+        events_ba = _buy_event("b", "2317", 500, "100") + _buy_event("a", "2330", 1000, "500")
+        acc_ab = fold(events_ab, _fresh_account())
+        acc_ba = fold(events_ba, _fresh_account())
+        assert acc_ab._ledger.settled_cash == acc_ba._ledger.settled_cash
+        assert acc_ab.positions["2330"].open_shares == acc_ba.positions["2330"].open_shares
+        assert acc_ab.positions["2317"].open_shares == acc_ba.positions["2317"].open_shares
+
+    def test_account_level_events_commute_with_order_events(self):
+        """DIVIDEND and SETTLE don't depend on order state; reordering is safe."""
+        t = date(2026, 7, 1)
+        t2 = date(2026, 7, 5)
+        buy = _buy_event("o1", "2330", 1000, "500")
+        dividend = BrokerEvent(
+            ts=t,
+            kind=EventKind.DIVIDEND,
+            order_id=None,
+            payload={"amount": "5000", "pay_date": t2.isoformat()},
+        )
+        events_buy_first = buy + [dividend]
+        events_div_first = [dividend] + buy
+        acc1 = fold(events_buy_first, _fresh_account())
+        acc2 = fold(events_div_first, _fresh_account())
+        assert acc1._ledger.settled_cash == acc2._ledger.settled_cash
+        assert len(acc1._ledger.pending) == len(acc2._ledger.pending)
+        assert acc1.positions["2330"].open_shares == acc2.positions["2330"].open_shares
