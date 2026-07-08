@@ -79,6 +79,12 @@ class Bar:
     corporate_actions: tuple[CorporateAction, ...]
 
 
+@dataclass(frozen=True)
+class BarBatch:
+    date: date
+    bars: Mapping[str, Bar]
+
+
 OrderId = NewType("OrderId", str)
 
 
