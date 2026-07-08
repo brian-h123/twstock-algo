@@ -7,6 +7,7 @@ from typing import Literal
 import exchange_calendars as xcals
 import pandas as pd
 
+from twstock.broker.corporate_actions import share_multiplier
 from twstock.broker.events import ActionType, Bar, CorporateAction
 
 _XTAI = xcals.get_calendar("XTAI")
@@ -55,25 +56,17 @@ def _round_to_tick(price: Decimal, *, direction: Literal["up", "down"]) -> Decim
 def _ex_day_reference(prior_close: Decimal, actions: tuple[CorporateAction, ...]) -> Decimal:
     reference_price = prior_close
     for action in actions:
-        if action.action_type == ActionType.STOCK_SPLIT:
-            if action.ratio is None or action.ratio <= 0:
-                raise ValueError(f"STOCK_SPLIT action has invalid ratio: {action}")
-            reference_price = reference_price * Decimal(str(action.ratio))
+        if action.action_type in (ActionType.STOCK_SPLIT, ActionType.STOCK_DIVIDEND):
+            reference_price = reference_price / Decimal(str(share_multiplier(action)))
         elif action.action_type == ActionType.CASH_DIVIDEND:
             if action.cash_amount is None:
                 raise ValueError(f"CASH_DIVIDEND action missing cash_amount: {action}")
             reference_price -= action.cash_amount
-        elif action.action_type == ActionType.STOCK_DIVIDEND:
-            if action.ratio is None or action.ratio <= 0:
-                raise ValueError(f"STOCK_DIVIDEND action has invalid ratio: {action}")
-            reference_price = reference_price / (1 + Decimal(str(action.ratio)))
         elif action.action_type == ActionType.CASH_AND_STOCK_DIVIDEND:
             if action.cash_amount is None:
                 raise ValueError(f"CASH_AND_STOCK_DIVIDEND action missing cash_amount: {action}")
-            if action.ratio is None or action.ratio <= 0:
-                raise ValueError(f"CASH_AND_STOCK_DIVIDEND action has invalid ratio: {action}")
-            reference_price = (reference_price - action.cash_amount) / (
-                1 + Decimal(str(action.ratio))
+            reference_price = (reference_price - action.cash_amount) / Decimal(
+                str(share_multiplier(action))
             )
         elif action.action_type in (ActionType.RIGHTS_ISSUE, ActionType.CAPITAL_REDUCTION):
             raise ValueError(
