@@ -21,6 +21,12 @@ class RejectionReason(Enum):
 
 
 class PriceLimitProvider(ABC):
+    def observe(self, bar: Bar) -> None:
+        """Optional hook for providers that need to accumulate history to
+        derive a band (e.g. replay). Providers that read limits directly
+        (e.g. live) can leave this a no-op."""
+        pass
+
     @abstractmethod
     def band(self, ticker: str, t: date) -> tuple[Decimal, Decimal] | None:
         """Return (limit_down, limit_up) for ticker on date t, or None if

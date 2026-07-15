@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from datetime import date
 
 import pytest
 
@@ -49,6 +50,7 @@ class TestOrderConstruction:
         defaults = dict(
             order_id=OrderId("o1"),
             ticker="2330",
+            decided_at=date(2026, 1, 1),
             side=Side.BUY,
             quantity=1000,
         )

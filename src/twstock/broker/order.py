@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 
 from twstock.broker.events import OrderId, Side
@@ -23,6 +24,7 @@ class OrderStatus(Enum):
 class Order:
     order_id: OrderId
     ticker: str
+    decided_at: date
     side: Side
     quantity: int
     tif: TimeInForce = TimeInForce.IOC
