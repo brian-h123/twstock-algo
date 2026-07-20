@@ -175,6 +175,8 @@ def fold(events: Iterable[BrokerEvent], into: Account) -> Account:
                 into.positions[ticker].on_split(ratio)
         elif event.kind == EventKind.SETTLE:
             into._ledger.mature(event.ts)
+        elif event.kind == EventKind.CASH_SHORTFALL:
+            pass
         else:
             raise ValueError(f"unhandled event kind: {event.kind}")
 

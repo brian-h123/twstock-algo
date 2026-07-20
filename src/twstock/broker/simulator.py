@@ -71,6 +71,7 @@ class BrokerSimulator(BrokerBase):
         suspension_calendar: SuspensionCalendar | None = None,
         price_limit_provider: PriceLimitProvider | None = None,
     ) -> None:
+        self._capital = capital
         self._account: Account = Account(initial_capital=capital, settlement=settlement)
         self._event_buffer: list[BrokerEvent] = []
         self._working_orders: dict[OrderId, Order] = {}
@@ -238,3 +239,21 @@ class BrokerSimulator(BrokerBase):
 
         for ticker, bar in bar_batch.bars.items():
             self._prior_volume[ticker] = bar.volume
+
+    @property
+    def capital(self) -> Decimal:
+        return self._capital
+
+    @property
+    def settlement(self) -> SettlementModel:
+        return self._account.settlement
+
+    def with_settlement(self, settlement: SettlementModel) -> "BrokerSimulator":
+        return BrokerSimulator(
+            capital=self._capital,
+            cost_model=self.cost_model,
+            fill_model=self.fill_model,
+            settlement=settlement,
+            suspension_calendar=self.suspension_calendar,
+            price_limit_provider=self.price_limit_provider,
+        )

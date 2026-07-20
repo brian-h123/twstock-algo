@@ -100,6 +100,7 @@ class EventKind(Enum):
     DIVIDEND = "dividend"
     SPLIT = "split"
     SETTLE = "settle"
+    CASH_SHORTFALL = "cash_shortfall"
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,7 @@ class EventLog:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             with open(path, encoding="utf-8") as f:
                 self._seq: int = sum(1 for _ in f)
