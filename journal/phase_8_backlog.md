@@ -86,6 +86,12 @@ there, not inherited wholesale from `PaperSession`:
    storage or a FinMind EOD poll). `LiveSession` will need to query the
    broker API directly for prices instead of going through any `BarFeed` — a
    different data path entirely, not just a different feed implementation.
+3. **Session ID uniqueness.** `PaperSession._next_session_seq` (a `ClassVar`
+   counter) only guarantees a unique `session_id` within one running process —
+   deliberately, since nothing today constructs `PaperSession`s concurrently
+   across processes. If `LiveSession` or any batch/parallel orchestration
+   introduces genuinely concurrent processes, revisit whether `uuid4()` (or a
+   composite counter + UUID) is warranted instead.
 
 **Natural trigger:** Phase 8 kickoff, once the real Fubon/Shioaji adapter's
 actual constraints are known and `LiveSession` can be designed (or extracted
