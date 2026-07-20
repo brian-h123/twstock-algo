@@ -56,3 +56,37 @@ tracked as deferred/non-blocking (ADR 0008, `PHASE_5.md §10`) — if `Engine`
 is ever rebuilt onto the shared execution core, that is the moment to also
 revisit unifying sizing under one `Allocator` shape, since both changes touch
 the same `Strategy`/`CrossSectionalStrategy` dispatch boundary.
+
+## `LiveSession` should mirror `PaperSession`'s execution flow, diverging only at broker connection and price sourcing
+
+Raised: 2026-07-20 (Phase 5, step 10, designing `PaperSession`'s constructor and run loop).
+
+The point of paper trading is to rehearse what live trading will actually look
+like, so a future `LiveSession`'s `decide → submit → advance → drain → fold →
+mark` spine should be the same shape as `PaperSession`'s, not a parallel
+design. `BrokerSimulator` and `PaperSession` were deliberately built to mimic
+real execution as closely as possible for exactly this reason — the closer
+the two shapes match, the more the Phase 5 simulator actually validates before
+real capital is at risk.
+
+Two things are genuinely different for Phase 8 and need their own design
+there, not inherited wholesale from `PaperSession`:
+
+1. **Broker connection.** `PaperSession` constructs its own `BrokerSimulator`
+   internally — capital, cost model, fill model, settlement are all pure
+   config, nothing to bootstrap. A real broker adapter needs credentials, a
+   `.pfx` certificate, and an authenticated connection: external resources
+   that can't be wired up inside a constructor the same way. `LiveSession`
+   will need to *receive* an already-connected `BrokerBase` implementation
+   rather than build one, and a decision is needed on how a user actually
+   creates and starts a live session — what constructs the adapter, where
+   credentials come from, what the entry point looks like.
+2. **Price data source.** `PaperSession` reads OHLCV from a pre-built
+   `BarFeed` (`ReplayFeed`/`FixtureFeed`/`LiveFeed`, sourced from local
+   storage or a FinMind EOD poll). `LiveSession` will need to query the
+   broker API directly for prices instead of going through any `BarFeed` — a
+   different data path entirely, not just a different feed implementation.
+
+**Natural trigger:** Phase 8 kickoff, once the real Fubon/Shioaji adapter's
+actual constraints are known and `LiveSession` can be designed (or extracted
+from `PaperSession`) directly against them, rather than guessed at now.
