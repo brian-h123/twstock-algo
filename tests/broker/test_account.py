@@ -399,6 +399,27 @@ class TestO1ValueConservation:
         tv_after = acc.total_value({"2330": mark_price})
         assert tv_after == tv_before - cost
 
+    def test_netting_same_day_trade_reflected_immediately(self):
+        """Regression: NettingSettlement holds a same-day trade's cash
+        delta in ledger.bar_net until the next day's SETTLE flushes it.
+        Before the fix, total_value ignored bar_net entirely, so a
+        same-day fill was invisible to equity until a day later -- the
+        buy's debit wouldn't show, while the new position's mark value
+        would, overstating equity by the full notional until the flush."""
+        acc = _account("1000000", NettingSettlement())
+        mark_price = Decimal("500")
+        cost = Decimal("4275")
+        tv_before = acc.total_value({})
+        fold(
+            [
+                _submitted("o1", 1000),
+                _fill_event("o1", "2330", Side.BUY, 1000, str(mark_price), str(cost)),
+            ],
+            acc,
+        )
+        tv_same_day = acc.total_value({"2330": mark_price})
+        assert tv_same_day == tv_before - cost
+
     def test_sell_at_mark_price_reduces_total_value_by_sell_cost(self):
         acc = _account("2000000", InstantSettlement())
         price = Decimal("500")

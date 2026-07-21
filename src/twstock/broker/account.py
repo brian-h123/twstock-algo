@@ -60,7 +60,15 @@ class Account:
         return result
 
     def total_value(self, prices: Mapping[str, Decimal]) -> Decimal:
-        """Return total account equity: settled cash + pending cash + position value.
+        """Return total account equity: settled cash + pending cash +
+        today's not-yet-flushed net (NettingSettlement) + position value.
+
+        ``ledger.bar_net`` holds the running net of same-day trades under
+        NettingSettlement until the next day's SETTLE event flushes it
+        into ``pending`` (see DatedLedger's docstring); it must be counted
+        here too, or a same-day trade's cash impact is invisible to
+        equity until that flush, one bar later. It is always zero under
+        InstantSettlement and SettledCashOnly, which never touch it.
 
         Args:
             prices: Map of ticker → current mark price, forwarded to
@@ -70,7 +78,12 @@ class Account:
             Net asset value of the account in NT$.
         """
         pending_sum = sum((cf.amount for cf in self._ledger.pending), Decimal(0))
-        return self._ledger.settled_cash + pending_sum + self.mark_to_market(prices=prices)
+        return (
+            self._ledger.settled_cash
+            + pending_sum
+            + self._ledger.bar_net
+            + self.mark_to_market(prices=prices)
+        )
 
 
 def fold(events: Iterable[BrokerEvent], into: Account) -> Account:
