@@ -111,11 +111,12 @@ class TestT2CalendarMath:
 
     def test_friday_settles_on_tuesday_not_sunday(self):
         # 2025-07-11 is a Friday; timedelta(2) gives 2025-07-13 (Sunday, non-trading).
-        # XTAI T+2 must give 2025-07-15 (Tuesday).
+        # XTAI T+2 must give 2025-07-15 (Tuesday). A sell is used because
+        # SettledCashOnly now only defers proceeds (sells), not purchases.
         friday = date(2025, 7, 11)
         ledger = _ledger("1000000")
         model = SettledCashOnly()
-        model.on_trade(ledger, _buy(1000, "500"), friday)
+        model.on_trade(ledger, _sell(1000, "500"), friday)
         assert len(ledger.pending) == 1
         settle_date = ledger.pending[0].settle_date
         assert settle_date.weekday() < 5, f"{settle_date} is a weekend"
@@ -324,12 +325,15 @@ class TestSharedSettlementInstanceAcrossLedgers:
 
 
 class TestSettledCashOnly:
-    def test_buy_goes_to_pending_not_settled_cash(self):
+    def test_buy_debits_settled_cash_immediately(self):
+        """A buy spends cash already on hand -- its debit applies at once,
+        unlike a sell's proceeds, which must wait for T+2 (see
+        test_sell_goes_to_pending_not_settled_cash right below)."""
         ledger = _ledger("1000000")
         model = SettledCashOnly()
         model.on_trade(ledger, _buy(1000, "500", "4275"), date(2026, 7, 1))
-        assert ledger.settled_cash == Decimal("1000000")
-        assert len(ledger.pending) == 1
+        assert ledger.settled_cash == Decimal("495725")
+        assert len(ledger.pending) == 0
 
     def test_sell_goes_to_pending_not_settled_cash(self):
         ledger = _ledger("0")

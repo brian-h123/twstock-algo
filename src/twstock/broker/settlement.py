@@ -231,16 +231,25 @@ class NettingSettlement(SettlementModel):
 
 
 class SettledCashOnly(SettlementModel):
-    """Conservative settlement: every fill deferred to T+2 XTAI.
+    """Conservative settlement: sale proceeds deferred to T+2 XTAI;
+    purchases debit settled cash immediately.
 
-    Each trade's cash delta goes to ``ledger.pending`` at T+2;
-    ``buying_power`` equals only ``settled_cash``. No same-bar credit —
-    a sell on date T cannot fund a buy on the same date T.
+    A buy spends cash already on hand, so its (negative) cash delta
+    applies to ``ledger.settled_cash`` at once — there is nothing to wait
+    on. A sell's proceeds are not yet realized cash, so its (positive)
+    delta goes to ``ledger.pending`` and matures on T+2.
+    ``buying_power`` equals only ``settled_cash`` — no same-bar credit,
+    so a sell on date T cannot fund a buy on the same date T.
     """
 
     def on_trade(self, ledger: DatedLedger, fill: Fill, t: date) -> None:
         cash_delta = _cash_delta(fill=fill)
-        ledger.pending.append(DatedCashFlow(amount=cash_delta, settle_date=_xtai_t_plus(t=t, n=2)))
+        if cash_delta < 0:
+            ledger.settled_cash += cash_delta
+        else:
+            ledger.pending.append(
+                DatedCashFlow(amount=cash_delta, settle_date=_xtai_t_plus(t=t, n=2))
+            )
 
     def buying_power(self, ledger: DatedLedger, t: date) -> Decimal:
         return ledger.settled_cash
