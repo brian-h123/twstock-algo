@@ -48,11 +48,24 @@ class DatedLedger:
     DatedCashFlows that migrate to ``settled_cash`` on their
     ``settle_date`` via ``mature()``. Total cash (settled + pending) is
     invariant across ``mature()`` calls (invariant O2).
+
+    ``bar_net`` and ``bar_date`` are scratch space for settlement models
+    that net same-bar trades before scheduling them (``NettingSettlement``).
+    They live here — one per account's own ledger — rather than on the
+    settlement model instance, because a single ``SettlementModel`` instance
+    may be shared across more than one ``Account`` (e.g. ``BrokerSimulator``'s
+    internal account and ``PaperSession``'s own account both fold the same
+    event stream against one settlement policy). Keeping the accumulator on
+    the ledger keeps each account's bookkeeping independent even when the
+    policy object is shared. Settlement models that don't net (``Instant``,
+    ``SettledCashOnly``) simply never touch these two fields.
     """
 
     def __init__(self) -> None:
         self.settled_cash: Decimal = Decimal(0)
         self.pending: list[DatedCashFlow] = []
+        self.bar_net: Decimal = Decimal(0)
+        self.bar_date: date | None = None
 
     def mature(self, t: date) -> None:
         """Reclassify flows whose settle_date <= t into settled_cash.
@@ -98,6 +111,46 @@ class SettlementModel(ABC):
         """
         ...
 
+    def on_bar_start(self, ledger: DatedLedger, t: date) -> None:
+        """Advance the settlement policy's per-day state to trading day t.
+
+        Wired to the SETTLE event (which fires before that bar's own trades
+        are folded) — so a settlement model can push any now-fully-concluded
+        PRIOR day's accrual into ``ledger.pending`` without waiting for a
+        later trade to trigger the flush. Default is a no-op; only models
+        that net same-day trades (``NettingSettlement``) need to override
+        this.
+
+        ``t`` must be the trading DAY, never a finer intraday bar timestamp
+        — implementations compare ``t`` against the ledger's currently-open
+        day and only act when it actually changes. That comparison is what
+        makes repeated same-day calls safe no-ops: SETTLE fires once per
+        ``process_bar`` call, which today (daily bars) means once per
+        trading day, but a future intraday feed could call this several
+        times within one day without harm, *as long as every one of those
+        calls passes the same calendar date*. Passing a per-bar timestamp
+        instead would break same-day netting by making every intraday bar
+        look like a new day.
+
+        Args:
+            ledger: The account's cash ledger.
+            t: The trading day about to be processed (not a bar timestamp).
+        """
+        return None
+
+    def close(self, ledger: DatedLedger) -> None:
+        """Flush any remaining per-day accrual once no more days will come.
+
+        Called exactly once, after the last bar of a run has been processed,
+        to account for the case ``on_bar_start`` cannot reach: the final
+        trading day's own trades have no later day to flush them. Default
+        is a no-op.
+
+        Args:
+            ledger: The account's cash ledger.
+        """
+        return None
+
 
 def _cash_delta(fill: Fill) -> Decimal:
     if fill.side == Side.BUY:
@@ -129,31 +182,52 @@ class InstantSettlement(SettlementModel):
 
 
 class NettingSettlement(SettlementModel):
-    """TWSE-flavored settlement: net intrabar cash deferred to T+2 XTAI.
+    """TWSE-flavored settlement: net intraday cash deferred to T+2 XTAI.
 
-    Within a bar, buys and sells are netted in ``_bar_net``. When a new
-    bar date is observed, the accumulated net is flushed to
-    ``ledger.pending`` with a settlement date of T+2 on the XTAI
-    calendar. ``buying_power`` includes the current bar's running net so
-    a same-bar sell can immediately fund a same-bar buy.
+    Within a trading day, buys and sells are netted in ``ledger.bar_net``
+    (state lives on the ledger, not this policy object, so one
+    NettingSettlement instance can be safely shared across more than one
+    Account/ledger — see DatedLedger's docstring). The accumulated net is
+    flushed to ``ledger.pending`` with a settlement date of T+2 on the XTAI
+    calendar, either when a new trading day is observed (``on_bar_start``,
+    the common case — safe to call more than once per day, see its
+    docstring) or when the run ends (``close``, for the final day's own net,
+    which has no later day to trigger the flush). ``buying_power`` includes
+    the current day's running net so a same-day sell can immediately fund a
+    same-day buy.
+
+    Despite the ``bar_``-prefixed field names (kept for continuity with the
+    ledger's ``bar_net``/``bar_date`` attributes), every ``t`` this class
+    receives is a trading DAY, never a bar timestamp — see
+    ``on_bar_start``'s docstring for why that distinction matters once bars
+    stop being one-per-day.
     """
 
-    def __init__(self) -> None:
-        self._bar_date: date | None = None
-        self._bar_net: Decimal = Decimal(0)
+    def _flush(self, ledger: DatedLedger) -> None:
+        assert ledger.bar_date is not None
+        ledger.pending.append(
+            DatedCashFlow(amount=ledger.bar_net, settle_date=_xtai_t_plus(t=ledger.bar_date, n=2))
+        )
+        ledger.bar_net = Decimal(0)
+        ledger.bar_date = None
 
     def on_trade(self, ledger: DatedLedger, fill: Fill, t: date) -> None:
-        if self._bar_date is not None and self._bar_date != t:
-            ledger.pending.append(
-                DatedCashFlow(amount=self._bar_net, settle_date=_xtai_t_plus(t=self._bar_date, n=2))
-            )
-            self._bar_net = Decimal(0)
+        if ledger.bar_date is not None and ledger.bar_date != t:
+            self._flush(ledger)
 
-        self._bar_date = t
-        self._bar_net += _cash_delta(fill=fill)
+        ledger.bar_date = t
+        ledger.bar_net += _cash_delta(fill=fill)
 
     def buying_power(self, ledger: DatedLedger, t: date) -> Decimal:
-        return max(Decimal(0), ledger.settled_cash + self._bar_net)
+        return max(Decimal(0), ledger.settled_cash + ledger.bar_net)
+
+    def on_bar_start(self, ledger: DatedLedger, t: date) -> None:
+        if ledger.bar_date is not None and ledger.bar_date != t:
+            self._flush(ledger)
+
+    def close(self, ledger: DatedLedger) -> None:
+        if ledger.bar_date is not None:
+            self._flush(ledger)
 
 
 class SettledCashOnly(SettlementModel):

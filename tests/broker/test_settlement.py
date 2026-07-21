@@ -205,6 +205,121 @@ class TestNettingSettlement:
         assert len(ledger.pending) == 1  # t1 net now flushed
 
 
+# ── on_bar_start ──────────────────────────────────────────────────────────────
+
+
+class TestOnBarStart:
+    """on_bar_start pushes a fully-concluded prior bar's net into pending
+    without waiting for a later trade — the fix for the case where a bar's
+    trade is never followed by another trade."""
+
+    def test_no_op_when_nothing_accrued(self):
+        ledger = _ledger("1000000")
+        NettingSettlement().on_bar_start(ledger, date(2026, 7, 1))
+        assert ledger.pending == []
+        assert ledger.bar_net == Decimal(0)
+
+    def test_flushes_prior_bar_with_no_further_trade(self):
+        """The case on_trade's flush-on-next-trade alone cannot reach: a
+        bar's net with no later trade to trigger it."""
+        t1, t2 = date(2026, 7, 1), date(2026, 7, 2)
+        ledger = _ledger("1000000")
+        model = NettingSettlement()
+        model.on_trade(ledger, _buy(1000, "500"), t1)
+        assert ledger.pending == []
+
+        model.on_bar_start(ledger, t2)  # rolling into t2, no trade on t2 at all
+        assert len(ledger.pending) == 1
+        assert ledger.pending[0].amount == -(1000 * Decimal("500"))
+        assert ledger.bar_net == Decimal(0)
+        assert ledger.bar_date is None
+
+    def test_same_date_does_not_flush(self):
+        """on_bar_start called again for the SAME bar (e.g. a second event
+        on the same date) must not prematurely flush a still-open bar."""
+        t1 = date(2026, 7, 1)
+        ledger = _ledger("1000000")
+        model = NettingSettlement()
+        model.on_trade(ledger, _buy(1000, "500"), t1)
+        model.on_bar_start(ledger, t1)
+        assert ledger.pending == []
+        assert ledger.bar_date == t1
+
+    def test_multi_bar_gap_flushes_on_the_very_next_bar(self):
+        """A trade followed by several quiet bars (no trades at all) must
+        still flush on the first of those bars, not remain stuck."""
+        t1, t2, t3 = date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)
+        ledger = _ledger("1000000")
+        model = NettingSettlement()
+        model.on_trade(ledger, _buy(1000, "500"), t1)
+        model.on_bar_start(ledger, t2)
+        assert len(ledger.pending) == 1
+        model.on_bar_start(ledger, t3)  # already flushed; must not double-flush
+        assert len(ledger.pending) == 1
+
+
+# ── close ─────────────────────────────────────────────────────────────────────
+
+
+class TestClose:
+    """close() covers the one gap on_bar_start cannot: the final bar of a
+    run, which has no later bar to trigger a flush."""
+
+    def test_no_op_when_flat(self):
+        ledger = _ledger("1000000")
+        NettingSettlement().close(ledger)
+        assert ledger.pending == []
+
+    def test_flushes_open_bar_net(self):
+        t1 = date(2026, 7, 1)
+        ledger = _ledger("1000000")
+        model = NettingSettlement()
+        model.on_trade(ledger, _sell(1000, "500"), t1)
+        model.close(ledger)
+        assert len(ledger.pending) == 1
+        assert ledger.pending[0].amount == 1000 * Decimal("500")
+        assert ledger.pending[0].settle_date == date(2026, 7, 3)
+        assert ledger.bar_date is None
+
+
+# ── cross-ledger independence when one NettingSettlement is shared ───────────
+
+
+class TestSharedSettlementInstanceAcrossLedgers:
+    """Regression: BrokerSimulator and PaperSession each keep their own
+    Account/DatedLedger but are constructed with the SAME SettlementModel
+    instance. Before the bar_net/bar_date state moved onto DatedLedger, this
+    caused every trade to be netted twice (once per ledger) into shared
+    instance attributes on NettingSettlement itself."""
+
+    def test_one_instance_two_ledgers_do_not_double_count(self):
+        t1 = date(2026, 7, 1)
+        shared_model = NettingSettlement()
+        ledger_a = _ledger("1000000")
+        ledger_b = _ledger("1000000")
+
+        shared_model.on_trade(ledger_a, _buy(1000, "500"), t1)
+        shared_model.on_trade(ledger_b, _buy(1000, "500"), t1)
+
+        assert ledger_a.bar_net == -(1000 * Decimal("500"))
+        assert ledger_b.bar_net == -(1000 * Decimal("500"))
+
+    def test_flushing_one_ledger_does_not_affect_the_other(self):
+        t1, t2 = date(2026, 7, 1), date(2026, 7, 2)
+        shared_model = NettingSettlement()
+        ledger_a = _ledger("1000000")
+        ledger_b = _ledger("1000000")
+        shared_model.on_trade(ledger_a, _buy(1000, "500"), t1)
+        shared_model.on_trade(ledger_b, _buy(1000, "500"), t1)
+
+        shared_model.on_bar_start(ledger_a, t2)  # flush only ledger_a
+
+        assert len(ledger_a.pending) == 1
+        assert ledger_a.bar_date is None
+        assert len(ledger_b.pending) == 0  # untouched
+        assert ledger_b.bar_date == t1
+
+
 # ── SettledCashOnly ───────────────────────────────────────────────────────────
 
 

@@ -174,6 +174,15 @@ def fold(events: Iterable[BrokerEvent], into: Account) -> Account:
             if ticker in into.positions:
                 into.positions[ticker].on_split(ratio)
         elif event.kind == EventKind.SETTLE:
+            # SETTLE fires once per process_bar call -- today (daily bars)
+            # that is once per trading day, but a future intraday feed could
+            # fire it several times within the SAME day. Both calls below
+            # are safe under that: each is guarded by a date comparison
+            # against event.ts (a trading DAY, not a bar timestamp), so
+            # repeated same-day calls are no-ops and only a genuine day
+            # rollover does anything. See SettlementModel.on_bar_start's
+            # docstring for the contract this depends on.
+            into.settlement.on_bar_start(into._ledger, event.ts)
             into._ledger.mature(event.ts)
         elif event.kind == EventKind.CASH_SHORTFALL:
             pass

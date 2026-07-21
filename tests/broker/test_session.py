@@ -181,6 +181,35 @@ def test_forced_liquidation_closes_position_by_final_bar(monkeypatch) -> None:
     assert len(sell_fills) == 1
 
 
+# ─── NettingSettlement close() at the final bar ─────────────────────────────
+
+
+def test_netting_settlement_final_equity_reflects_the_closing_trade(monkeypatch) -> None:
+    """Regression: the forced-liquidation sell is the LAST trade of the run,
+    so no later bar's on_bar_start can ever flush its net -- close() must
+    fire before the final equity_curve point is read. Before the fix, this
+    trade's cash simply never reached the ledger and final_equity silently
+    stayed at initial capital (a phantom ~equal-to-notional overstatement)."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    kwargs = _default_kwargs(feed)
+    kwargs["settlement"] = NettingSettlement()
+    session = PaperSession(**kwargs)
+
+    result = session.run()
+
+    # A full buy-then-sell round trip on ~all capital costs a few tenths of a
+    # percent (commission + tax + slippage) -- final equity must be close to,
+    # but strictly less than, initial capital. Before the fix it stayed
+    # exactly at initial capital (the closing sell's cash was never folded).
+    assert result.final_equity < result.initial_capital
+    assert result.final_equity > result.initial_capital * Decimal("0.99")
+    assert session.account._ledger.bar_net == Decimal(0)
+    assert session.account._ledger.bar_date is None
+
+
 # ─── Integration: single-asset SMA replay, real data ───────────────────────────
 
 

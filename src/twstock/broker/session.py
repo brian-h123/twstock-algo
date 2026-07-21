@@ -279,12 +279,17 @@ class PaperSession:
         equity_curve: dict[date, Decimal] = {}
         positions_rows: list[dict] = []
 
-        def _advance_and_mark(bar_batch: BarBatch) -> None:
+        def _advance_and_mark(bar_batch: BarBatch, *, is_last: bool = False) -> None:
             self.broker.process_bar(bar_batch)
             events = self.broker.drain_events()
             for e in events:
                 self.event_log.append(e)
             fold(events, into=self.account)
+            if is_last:
+                # No later bar's SETTLE will ever flush this bar's own net
+                # (on_bar_start only fires for bars still to come) — close()
+                # covers exactly that gap before the final equity is read.
+                self.account.settlement.close(self.account._ledger)
             last_raw_close.update({t: bar.close for t, bar in bar_batch.bars.items()})
             equity_curve[bar_batch.date] = self.account.total_value(prices=last_raw_close)
             for ticker, ledger in self.account.positions.items():
@@ -299,15 +304,16 @@ class PaperSession:
                         }
                     )
 
-        _advance_and_mark(batches[0])
+        _advance_and_mark(batches[0], is_last=(len(batches) == 1))
 
         for i in range(len(batches) - 1):
             T, T_next = batches[i], batches[i + 1]
-            if i == len(batches) - 2:
+            is_last = i == len(batches) - 2
+            if is_last:
                 self._force_liquidate(T.date)
             else:
                 decide(T, last_raw_close)
-            _advance_and_mark(T_next)
+            _advance_and_mark(T_next, is_last=is_last)
 
         if positions_rows:
             positions_daily = pd.DataFrame(positions_rows).set_index(["date", "ticker"])
