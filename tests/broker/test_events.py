@@ -272,3 +272,26 @@ class TestO10FoldIdempotence:
         assert acc1._ledger.settled_cash == acc2._ledger.settled_cash
         assert len(acc1._ledger.pending) == len(acc2._ledger.pending)
         assert acc1.positions["2330"].open_shares == acc2.positions["2330"].open_shares
+
+    def test_fill_before_submitted_is_a_known_gap_not_silently_wrong(self):
+        """ADR 0010 frames fold() as order-independent specifically because
+        a live broker can deliver a FILL before its own SUBMITTED ack
+        (Shioaji's documented deal-before-order case) -- but every other
+        case in this class only reorders INDEPENDENT events (different
+        tickers, or an account-level event against an order event), never
+        events WITHIN one order's own lifecycle. That case is untested,
+        and it turns out fold() does not actually support it:
+        FILL/PARTIAL_FILL unconditionally looks up
+        `into._orders[event.order_id]`, assuming SUBMITTED already ran.
+
+        This is deferred to Phase 8 (journal/phase_8_backlog.md), not
+        fixed here: the right fix (buffering unresolvable events?
+        synthesizing placeholder order state?) depends on a real live
+        adapter's actual reordering guarantees, which don't exist to
+        design against yet. A loud KeyError today is the honest interim
+        behavior -- this test pins that down explicitly, so a future
+        change to fold() has to consciously update this test rather than
+        silently leave a stale assumption behind."""
+        events = list(reversed(_buy_event("o1", "2330", 1000, "500")))
+        with pytest.raises(KeyError):
+            fold(events, _fresh_account())

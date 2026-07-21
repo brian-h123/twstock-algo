@@ -96,3 +96,38 @@ there, not inherited wholesale from `PaperSession`:
 **Natural trigger:** Phase 8 kickoff, once the real Fubon/Shioaji adapter's
 actual constraints are known and `LiveSession` can be designed (or extracted
 from `PaperSession`) directly against them, rather than guessed at now.
+
+## `Account.fold()` cannot actually handle a FILL arriving before its own SUBMITTED
+
+Raised: 2026-07-22 (Phase 5, step 12, building the adversarial fixture
+catalogue's state-machine group).
+
+ADR 0010 frames `fold()` as order-independent and idempotent specifically
+*because* a live broker can deliver events out of order — Shioaji's
+documented deal-before-order case is the named example. But that property
+was only ever tested for reordering *independent* events (different
+tickers' fills; an account-level event like `DIVIDEND` against an order
+event) — never reordering *within* one order's own lifecycle. It turns out
+`fold()` does not actually support that: `FILL`/`PARTIAL_FILL` unconditionally
+looks up `into._orders[event.order_id]`, assuming `SUBMITTED` already ran.
+Feeding `fold()` a `FILL` before its own `SUBMITTED` raises `KeyError` —
+confirmed with a 3-line repro, not theorized. See
+`tests/broker/test_events.py::TestO10FoldIdempotence::test_fill_before_submitted_is_a_known_gap_not_silently_wrong`,
+which pins the current (crashing) behavior down explicitly rather than
+leaving it an implicit gap.
+
+**Not fixed now, deliberately.** The real fix isn't a small branch —
+`fold()` needs the order's original `quantity` (from `SUBMITTED`) to compute
+`remaining_quantity` on a partial fill, so a `FILL` arriving first is
+missing information it cannot recover on its own. A correct fix means
+either buffering unresolvable events until their dependency arrives, or
+synthesizing placeholder order state and reconciling it once `SUBMITTED`
+shows up — and which shape is right depends on real reordering guarantees
+(how far out of order? can `FILL` arrive with no `SUBMITTED` ever
+following, e.g. after a reconnect?) that only exist once a real broker
+adapter is in hand. Designing against a guess risks solving the wrong
+problem, same trap as the other live-adapter items on this page.
+
+**Natural trigger:** Phase 8, once the Fubon/Shioaji adapter's actual
+event-ordering behavior is observed directly and `fold()` can be extended
+against real constraints instead of assumed ones.
