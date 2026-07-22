@@ -69,7 +69,7 @@ real execution as closely as possible for exactly this reason — the closer
 the two shapes match, the more the Phase 5 simulator actually validates before
 real capital is at risk.
 
-Two things are genuinely different for Phase 8 and need their own design
+Several things are genuinely different for Phase 8 and need their own design
 there, not inherited wholesale from `PaperSession`:
 
 1. **Broker connection.** `PaperSession` constructs its own `BrokerSimulator`
@@ -86,7 +86,25 @@ there, not inherited wholesale from `PaperSession`:
    storage or a FinMind EOD poll). `LiveSession` will need to query the
    broker API directly for prices instead of going through any `BarFeed` — a
    different data path entirely, not just a different feed implementation.
-3. **Session ID uniqueness.** `PaperSession._next_session_seq` (a `ClassVar`
+3. **State recovery on restart.** The broker API is the authoritative source
+   of truth for real cash and positions once Phase 8 lands, but `LiveSession`
+   will still keep its own local `Account` mirror, the same way
+   `BrokerSimulator._account` and `PaperSession.account` do today — used for
+   local buying-power/position checks without a round-trip on every decision.
+   That mirror must be rehydrated from the persisted event log on restart,
+   not reconstructed fresh, or a restarted `LiveSession` would silently
+   believe it holds no positions / full capital while the real broker
+   account (and the stale local mirror) disagree. `PaperSession` can
+   currently rebuild state by replaying bars through `ReplayFeed`/`LiveFeed`
+   from a fixed start — correct there because the whole simulated execution
+   core (fill model, settlement, account fold) is a deterministic function
+   of stored bar data (D1/D4/D13). `LiveSession` cannot use that trick: a
+   real fill carries information (actual execution price/timing/
+   microstructure) that isn't recoverable by replaying bars. It must
+   rehydrate via `fold()` over its own persisted *real* event log instead —
+   the same `fold()` function already built, just sourced from real broker
+   events, never from replay.
+4. **Session ID uniqueness.** `PaperSession._next_session_seq` (a `ClassVar`
    counter) only guarantees a unique `session_id` within one running process —
    deliberately, since nothing today constructs `PaperSession`s concurrently
    across processes. If `LiveSession` or any batch/parallel orchestration
