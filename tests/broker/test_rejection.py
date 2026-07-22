@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+import pandas as pd
 import pytest
 
 from twstock.broker.events import ActionType, Bar, CorporateAction
@@ -11,6 +12,7 @@ from twstock.broker.rejection import (
     SuspensionCalendar,
     classify_missing_bar,
 )
+from twstock.data.storage import write_suspensions
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -344,15 +346,76 @@ class TestCorporateActionValidation:
 # ── SuspensionCalendar ─────────────────────────────────────────────────────────
 
 
+@pytest.fixture
+def storage_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("twstock.data.storage.DATA_DIR", tmp_path)
+    return tmp_path
+
+
+def _write_halt(ticker: str, halt: str, resume: str) -> None:
+    write_suspensions(
+        ticker,
+        pd.DataFrame(
+            {
+                "ticker": [ticker],
+                "halt_date": pd.to_datetime([halt]),
+                "resume_date": pd.to_datetime([resume]),
+                "source": ["TWTAWU"],
+            }
+        ),
+    )
+
+
 class TestSuspensionCalendar:
-    """Step 6 ships the graceful-degradation stub only; the real TWTAWU-backed
-    calendar is step 13."""
+    """The no-arg constructor is the graceful-degradation default (step 6);
+    from_storage(...) is the TWTAWU-backed enrichment (step 13)."""
 
     def test_stub_always_reports_not_halted(self):
         cal = SuspensionCalendar()
         assert cal.is_halted("2330", date(2026, 6, 1)) is False
         assert cal.is_halted("2330", date(2020, 1, 1)) is False
         assert cal.is_halted("9999", date(2026, 6, 1)) is False
+
+    def test_from_storage_reports_halted_on_the_halted_session(self, storage_dir):
+        _write_halt("2317", "2025-07-30", "2025-07-31")
+        cal = SuspensionCalendar.from_storage(["2317"])
+        assert cal.is_halted("2317", date(2025, 7, 30)) is True
+
+    def test_from_storage_interval_is_half_open_at_resume(self, storage_dir):
+        # halt_date <= t < resume_date: the resume session itself trades normally.
+        _write_halt("2317", "2025-07-30", "2025-07-31")
+        cal = SuspensionCalendar.from_storage(["2317"])
+        assert cal.is_halted("2317", date(2025, 7, 31)) is False
+
+    def test_from_storage_not_halted_before_halt_date(self, storage_dir):
+        _write_halt("2317", "2025-07-30", "2025-07-31")
+        cal = SuspensionCalendar.from_storage(["2317"])
+        assert cal.is_halted("2317", date(2025, 7, 29)) is False
+
+    def test_from_storage_ticker_with_no_stored_file_stays_not_halted(self, storage_dir):
+        _write_halt("2317", "2025-07-30", "2025-07-31")
+        cal = SuspensionCalendar.from_storage(["2317", "2330"])
+        assert cal.is_halted("2330", date(2025, 7, 30)) is False
+
+    def test_from_storage_keeps_tickers_independent(self, storage_dir):
+        _write_halt("2317", "2025-07-30", "2025-07-31")
+        _write_halt("2327", "2021-06-30", "2021-07-01")
+        cal = SuspensionCalendar.from_storage(["2317", "2327"])
+        assert cal.is_halted("2317", date(2021, 6, 30)) is False
+        assert cal.is_halted("2327", date(2021, 6, 30)) is True
+
+    def test_from_storage_empty_store_degrades_gracefully(self, storage_dir):
+        cal = SuspensionCalendar.from_storage(["2317"])
+        assert cal.is_halted("2317", date(2025, 7, 30)) is False
+
+    def test_from_storage_returns_independent_instances(self, storage_dir):
+        _write_halt("2317", "2025-07-30", "2025-07-31")
+        first = SuspensionCalendar.from_storage(["2317"])
+        second = SuspensionCalendar.from_storage(["2317"])
+        assert first is not second
+        assert first.is_halted("2317", date(2025, 7, 30)) == second.is_halted(
+            "2317", date(2025, 7, 30)
+        )
 
 
 # ── classify_missing_bar ───────────────────────────────────────────────────────

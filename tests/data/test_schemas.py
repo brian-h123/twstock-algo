@@ -1,7 +1,12 @@
 import pandas as pd
 import pytest
 
-from twstock.data.schemas import CORPORATE_ACTIONS_SCHEMA, OHLCV_SCHEMA, validate
+from twstock.data.schemas import (
+    CORPORATE_ACTIONS_SCHEMA,
+    OHLCV_SCHEMA,
+    SUSPENSIONS_SCHEMA,
+    validate,
+)
 
 
 def _valid_ohlcv_row() -> dict:
@@ -407,6 +412,96 @@ def test_non_cash_rows_allow_null_pay_date():
 # ---------------------------------------------------------------------------
 # validate() helper
 # ---------------------------------------------------------------------------
+
+
+def _valid_suspensions_row() -> dict:
+    return {
+        "ticker": ["2317"],
+        "halt_date": pd.to_datetime(["2025-07-30"]),
+        "resume_date": pd.to_datetime(["2025-07-31"]),
+        "source": ["TWTAWU"],
+        "fetched_at": pd.to_datetime(["2026-07-22"]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SUSPENSIONS_SCHEMA — happy path
+# ---------------------------------------------------------------------------
+
+
+def test_suspensions_valid_df_passes():
+    df = pd.DataFrame(_valid_suspensions_row())
+    result = validate(df, SUSPENSIONS_SCHEMA)
+    assert len(result) == 1
+
+
+def test_suspensions_fetched_at_is_optional():
+    df = pd.DataFrame(_valid_suspensions_row() | {"fetched_at": pd.Series([pd.NaT])})
+    result = validate(df, SUSPENSIONS_SCHEMA)
+    assert len(result) == 1
+
+
+def test_suspensions_fetched_at_column_can_be_omitted():
+    df = pd.DataFrame(_valid_suspensions_row()).drop(columns=["fetched_at"])
+    result = validate(df, SUSPENSIONS_SCHEMA)
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# SUSPENSIONS_SCHEMA — column checks
+# ---------------------------------------------------------------------------
+
+
+def test_suspensions_rejects_bad_ticker():
+    df = pd.DataFrame(_valid_suspensions_row() | {"ticker": ["50"]})  # too short, fails ^\d{4}$
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_null_halt_date():
+    df = pd.DataFrame(
+        _valid_suspensions_row() | {"halt_date": pd.Series([pd.NaT], dtype="datetime64[ns]")}
+    )
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_null_resume_date():
+    df = pd.DataFrame(
+        _valid_suspensions_row() | {"resume_date": pd.Series([pd.NaT], dtype="datetime64[ns]")}
+    )
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_null_source():
+    df = pd.DataFrame(_valid_suspensions_row() | {"source": [None]})
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# SUSPENSIONS_SCHEMA — resume_date > halt_date check
+# ---------------------------------------------------------------------------
+
+
+def test_suspensions_rejects_resume_before_halt():
+    df = pd.DataFrame(
+        _valid_suspensions_row()
+        | {
+            "halt_date": pd.to_datetime(["2025-07-31"]),
+            "resume_date": pd.to_datetime(["2025-07-30"]),
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_resume_equal_halt():
+    same_day = pd.to_datetime(["2025-07-30"])
+    df = pd.DataFrame(_valid_suspensions_row() | {"halt_date": same_day, "resume_date": same_day})
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
 
 
 def test_validate_returns_dataframe():

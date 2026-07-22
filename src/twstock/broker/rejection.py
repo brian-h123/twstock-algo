@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import date
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import Enum
@@ -9,6 +10,8 @@ import pandas as pd
 
 from twstock.broker.corporate_actions import share_multiplier
 from twstock.broker.events import ActionType, Bar, CorporateAction
+from twstock.data.storage import read_suspensions
+from twstock.universe import get_top50_universe
 
 _XTAI = xcals.get_calendar("XTAI")
 
@@ -118,8 +121,22 @@ class SuspensionCalendar:
     Built from the TWTAWU historical halt records. ABSENT or unbuilt → all-tradeable
     (graceful degradation: every missing bar stays NO_MARKET_DATA)."""
 
+    def __init__(self, halts: dict[str, list[tuple[date, date]]] | None = None) -> None:
+        self._halts = halts or {}
+
+    @classmethod
+    def from_storage(cls, tickers: Iterable[str] | None = None) -> "SuspensionCalendar":
+        tickers = tickers if tickers is not None else get_top50_universe()
+        halts: dict[str, list[tuple[date, date]]] = {}
+        for ticker in tickers:
+            df = read_suspensions(ticker)
+            if df.empty:
+                continue
+            halts[ticker] = list(zip(df["halt_date"].dt.date, df["resume_date"].dt.date))
+        return cls(halts)
+
     def is_halted(self, ticker: str, t: date) -> bool:
-        return False
+        return any(halt <= t < resume for halt, resume in self._halts.get(ticker, ()))
 
 
 def classify_missing_bar(

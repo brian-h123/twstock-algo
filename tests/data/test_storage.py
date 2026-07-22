@@ -7,8 +7,10 @@ from twstock.data.storage import (
     query,
     read_corporate_actions,
     read_ohlcv,
+    read_suspensions,
     write_corporate_actions,
     write_ohlcv,
+    write_suspensions,
 )
 
 
@@ -248,6 +250,94 @@ def test_read_ca_missing_ticker_returns_empty_df(storage_dir):
     assert len(result) == 0
     for col in ["ex_date", "ticker", "action_type", "cash_amount", "ratio"]:
         assert col in result.columns
+
+
+# ---------------------------------------------------------------------------
+# helpers — suspensions
+# ---------------------------------------------------------------------------
+
+
+def _make_suspensions(
+    ticker="2317", halt_dates=("2025-07-30",), resume_dates=("2025-07-31",)
+) -> pd.DataFrame:
+    n = len(halt_dates)
+    return pd.DataFrame(
+        {
+            "ticker": [ticker] * n,
+            "halt_date": pd.to_datetime(halt_dates),
+            "resume_date": pd.to_datetime(resume_dates),
+            "source": ["TWTAWU"] * n,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# write_suspensions / read_suspensions
+# ---------------------------------------------------------------------------
+
+
+def test_write_suspensions_round_trip(storage_dir):
+    write_suspensions("2317", _make_suspensions())
+    result = read_suspensions("2317")
+    assert len(result) == 1
+    assert result["halt_date"].iloc[0] == pd.Timestamp("2025-07-30")
+    assert result["resume_date"].iloc[0] == pd.Timestamp("2025-07-31")
+
+
+def test_write_suspensions_idempotent(storage_dir):
+    df = _make_suspensions()
+    write_suspensions("2317", df)
+    write_suspensions("2317", df)
+    result = read_suspensions("2317")
+    assert len(result) == 1
+
+
+def test_write_suspensions_new_value_wins_on_same_key(storage_dir):
+    write_suspensions("2317", _make_suspensions(resume_dates=("2025-07-31",)))
+
+    df_updated = _make_suspensions(resume_dates=("2025-08-01",))
+    write_suspensions("2317", df_updated)
+
+    result = read_suspensions("2317")
+    assert len(result) == 1
+    assert result["resume_date"].iloc[0] == pd.Timestamp("2025-08-01")
+
+
+def test_write_suspensions_appends_new_halts(storage_dir):
+    write_suspensions(
+        "2317", _make_suspensions(halt_dates=("2025-07-30",), resume_dates=("2025-07-31",))
+    )
+    write_suspensions(
+        "2317", _make_suspensions(halt_dates=("2026-01-05",), resume_dates=("2026-01-06",))
+    )
+    result = read_suspensions("2317")
+    assert len(result) == 2
+
+
+def test_write_suspensions_empty_df_is_noop(storage_dir):
+    write_suspensions("2317", _make_suspensions().iloc[0:0])
+    result = read_suspensions("2317")
+    assert len(result) == 0
+
+
+def test_read_suspensions_missing_ticker_returns_empty_df(storage_dir):
+    result = read_suspensions("9999")
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 0
+    for col in ["ticker", "halt_date", "resume_date", "source"]:
+        assert col in result.columns
+
+
+def test_write_suspensions_keeps_tickers_independent(storage_dir):
+    write_suspensions("2317", _make_suspensions(ticker="2317"))
+    write_suspensions(
+        "2327",
+        _make_suspensions(ticker="2327", halt_dates=("2021-06-30",), resume_dates=("2021-07-01",)),
+    )
+
+    assert len(read_suspensions("2317")) == 1
+    assert len(read_suspensions("2327")) == 1
+    assert read_suspensions("2317")["ticker"].iloc[0] == "2317"
 
 
 # ---------------------------------------------------------------------------

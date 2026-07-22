@@ -96,6 +96,21 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
     ],
 )
 
+SUSPENSIONS_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "ticker": Column(pa.String, Check.str_matches(r"^\d{4}$")),
+        "halt_date": Column(pa.DateTime, nullable=False),
+        "resume_date": Column(pa.DateTime, nullable=False),
+        "source": Column(pa.String, nullable=False),  # "TWTAWU"
+        "fetched_at": Column(pa.DateTime, required=False, nullable=True),
+    },
+    checks=[
+        Check(
+            lambda df: (df["resume_date"] > df["halt_date"]).all(), error="resume_date <= halt_date"
+        )
+    ],
+)
+
 
 def validate(df: pd.DataFrame, schema: pa.DataFrameSchema) -> pd.DataFrame:
     """Validate a DataFrame against a pandera schema.

@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+    method: GET
+    uri: https://www.twse.com.tw/rwd/zh/afterTrading/TWTAWU?startDate=20260101&endDate=20260102&stockNo=&selectType=&querytype=3&response=json
+  response:
+    body:
+      string: 'Internal Server Error'
+    headers:
+      Content-Type:
+      - text/html
+    status:
+      code: 500
+      message: Internal Server Error
+version: 1

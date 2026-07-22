@@ -5,7 +5,15 @@ import pandas as pd
 import pytest
 
 from twstock.broker.events import ActionType, Bar, BarBatch, CorporateAction
-from twstock.broker.feed import BarFeed, FixtureFeed, ReplayFeed
+from twstock.broker.feed import (
+    BarFeed,
+    FixtureFeed,
+    LiveFeed,
+    ReplayFeed,
+    StaleLiveFeedError,
+    _assert_fresh,
+    _latest_completed_session,
+)
 from twstock.data.storage import write_corporate_actions, write_ohlcv
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -70,6 +78,24 @@ def _make_ca(
             * n,
         }
     )
+
+
+@pytest.fixture
+def set_today(monkeypatch):
+    """Pin LiveFeed's notion of "today" so tests don't depend on wall-clock
+    date. Patches the `date` name inside feed.py's module namespace with a
+    subclass whose today() is fixed -- the standard technique for a builtin
+    type that can't be monkeypatched directly."""
+
+    def _set(d: date) -> None:
+        class _FixedDate(date):
+            @classmethod
+            def today(cls):
+                return d
+
+        monkeypatch.setattr("twstock.broker.feed.date", _FixedDate)
+
+    return _set
 
 
 def _bar(
@@ -320,3 +346,98 @@ class TestFixtureFeed:
         [replayed] = list(FixtureFeed([batch]))
 
         assert "2317" not in replayed.bars
+
+
+# ── _latest_completed_session ───────────────────────────────────────────────
+
+
+class TestLatestCompletedSession:
+    def test_returns_today_when_today_is_a_trading_session(self, set_today):
+        # 2026-06-02 is a confirmed XTAI trading session (Tuesday).
+        set_today(date(2026, 6, 2))
+        assert _latest_completed_session() == date(2026, 6, 2)
+
+    def test_rolls_back_over_a_non_trading_day(self, set_today):
+        # 2026-06-06 is a Saturday; not an XTAI session.
+        set_today(date(2026, 6, 6))
+        assert _latest_completed_session() == date(2026, 6, 5)
+
+
+# ── _assert_fresh ────────────────────────────────────────────────────────────
+
+
+class TestAssertFresh:
+    def test_raises_when_2330_has_no_stored_data(self, storage_dir):
+        with pytest.raises(StaleLiveFeedError):
+            _assert_fresh(date(2026, 6, 2))
+
+    def test_raises_when_stored_range_does_not_reach_expected(self, storage_dir):
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-05-19",)))
+        with pytest.raises(StaleLiveFeedError):
+            _assert_fresh(date(2026, 6, 2))
+
+    def test_does_not_raise_when_stored_range_reaches_expected(self, storage_dir):
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-06-02",)))
+        _assert_fresh(date(2026, 6, 2))  # no raise
+
+    def test_does_not_raise_when_stored_range_exceeds_expected(self, storage_dir):
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-06-05",)))
+        _assert_fresh(date(2026, 6, 2))  # no raise
+
+
+# ── LiveFeed ─────────────────────────────────────────────────────────────────
+
+
+class TestLiveFeed:
+    def test_is_a_replay_feed(self, storage_dir, set_universe, set_today):
+        set_today(date(2026, 6, 2))
+        set_universe(["2330"])
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-06-02",)))
+
+        feed = LiveFeed(start=date(2026, 1, 1))
+
+        assert isinstance(feed, ReplayFeed)
+        assert isinstance(feed, BarFeed)
+
+    def test_freshness_check_raises_on_stale_store(self, storage_dir, set_universe, set_today):
+        set_today(date(2026, 6, 2))
+        set_universe(["2330"])
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-05-19",)))  # stale
+
+        with pytest.raises(StaleLiveFeedError):
+            LiveFeed(start=date(2026, 1, 1))
+
+    def test_freshness_check_false_bypasses_stale_store(self, storage_dir, set_universe, set_today):
+        set_today(date(2026, 6, 2))
+        set_universe(["2330"])
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-05-19",)))  # stale, ignored
+
+        feed = LiveFeed(start=date(2026, 1, 1), freshness_check=False)
+
+        assert [b.date for b in feed] == [date(2026, 5, 19)]
+
+    def test_reads_through_the_latest_completed_session(self, storage_dir, set_universe, set_today):
+        set_today(date(2026, 6, 2))
+        set_universe(["2330"])
+        write_ohlcv(
+            "2330", _make_ohlcv(dates=("2026-05-29", "2026-06-01", "2026-06-02", "2026-06-03"))
+        )
+
+        batches = list(LiveFeed(start=date(2026, 1, 1)))
+
+        # 2026-06-03 is beyond today's session and must be excluded, even
+        # though it's already sitting in local storage.
+        assert [b.date for b in batches] == [
+            date(2026, 5, 29),
+            date(2026, 6, 1),
+            date(2026, 6, 2),
+        ]
+
+    def test_start_excludes_earlier_bars(self, storage_dir, set_universe, set_today):
+        set_today(date(2026, 6, 2))
+        set_universe(["2330"])
+        write_ohlcv("2330", _make_ohlcv(dates=("2026-05-29", "2026-06-01", "2026-06-02")))
+
+        batches = list(LiveFeed(start=date(2026, 6, 1)))
+
+        assert [b.date for b in batches] == [date(2026, 6, 1), date(2026, 6, 2)]
