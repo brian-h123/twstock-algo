@@ -210,6 +210,112 @@ def test_netting_settlement_final_equity_reflects_the_closing_trade(monkeypatch)
     assert session.account._ledger.bar_date is None
 
 
+# ─── SimResult.trades and cost totals ──────────────────────────────────────
+
+
+def test_trades_has_one_row_per_fill_with_expected_schema(monkeypatch) -> None:
+    """Default fixture config produces exactly one volume-capped buy
+    (test_warm_up_caps_first_fill_by_prior_bar_volume) and one closing sell
+    (test_forced_liquidation_closes_position_by_final_bar) -- trades must
+    carry one row per fill, in the BacktestResult trade-schema column order."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    session = PaperSession(**_default_kwargs(feed))
+
+    result = session.run()
+
+    assert list(result.trades.columns) == [
+        "timestamp",
+        "ticker",
+        "side",
+        "shares",
+        "fill_price",
+        "commission",
+        "tax",
+        "notional",
+        "total_cost",
+    ]
+    assert len(result.trades) == 2
+    assert set(result.trades["side"]) == {"buy", "sell"}
+
+
+def test_total_commission_and_tax_match_independent_recompute(monkeypatch) -> None:
+    """Recomputes commission/tax from a fresh TaiwanCostModel call at the
+    known fixture reference price (every bar's open == 100), independent of
+    reading SimResult.trades' own commission/tax columns back -- catches a
+    wrong reference price (e.g. an adjusted or stale close) feeding _trade_row,
+    not just an arithmetic slip in the summation."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    session = PaperSession(**_default_kwargs(feed))
+
+    result = session.run()
+
+    cost_model = TaiwanCostModel()
+    buy_shares = int(result.trades.loc[result.trades["side"] == "buy", "shares"].iloc[0])
+    sell_shares = int(result.trades.loc[result.trades["side"] == "sell", "shares"].iloc[0])
+    _, exp_buy_commission = cost_model.buy_costs(_TICKER, buy_shares, 100.0)
+    _, exp_sell_commission, exp_sell_tax = cost_model.sell_costs(_TICKER, sell_shares, 100.0)
+
+    assert result.total_commission == Decimal(str(exp_buy_commission + exp_sell_commission))
+    assert result.total_tax == Decimal(str(exp_sell_tax))
+
+
+def test_total_slippage_cost_uses_backtester_formula(monkeypatch) -> None:
+    """total_slippage_cost must equal notional x slippage_pct -- the same
+    formula backtest/engine.py uses for BacktestResult -- so a future
+    reconciliation report's slippage tripwire compares like with like instead
+    of two differently-defined "slippage cost" numbers."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    session = PaperSession(**_default_kwargs(feed))
+
+    result = session.run()
+
+    slippage_pct = Decimal(str(TaiwanCostModel().slippage_bps_per_side / 10_000))
+    expected = sum(
+        (
+            Decimal(str(row.fill_price)) * row.shares * slippage_pct
+            for row in result.trades.itertuples()
+        ),
+        Decimal(0),
+    )
+    assert result.total_slippage_cost == expected
+
+
+def test_trades_empty_for_a_run_with_no_decision_bars() -> None:
+    """A single-bar feed never reaches a decide() call -- no bar pair exists
+    to decide on and later resolve -- so zero orders are submitted. trades
+    must stay an empty frame with the full column set (not just missing
+    columns), and every cost total must be exactly zero, not NaN."""
+    feed = FixtureFeed(batches=[_batch(_DATES[0])])
+    session = PaperSession(**_default_kwargs(feed))
+
+    result = session.run()
+
+    assert result.trades.empty
+    assert list(result.trades.columns) == [
+        "timestamp",
+        "ticker",
+        "side",
+        "shares",
+        "fill_price",
+        "commission",
+        "tax",
+        "notional",
+        "total_cost",
+    ]
+    assert result.total_commission == Decimal(0)
+    assert result.total_tax == Decimal(0)
+    assert result.total_slippage_cost == Decimal(0)
+
+
 # ─── Integration: single-asset SMA replay, real data ───────────────────────────
 
 

@@ -52,6 +52,33 @@ def _portfolio_shim(account: Account, equity: float) -> SimpleNamespace:
     )
 
 
+def _trade_row(event: BrokerEvent, bar_batch: BarBatch, cost_model: TaiwanCostModel) -> dict:
+    ticker = event.payload["ticker"]
+    side = event.payload["side"]
+    shares = int(event.payload["shares"])
+    fill_price = Decimal(event.payload["fill_price"])
+    reference_price = float(bar_batch.bars[ticker].open)
+
+    if side == "buy":
+        _, commission = cost_model.buy_costs(ticker, shares, reference_price)
+        tax = 0.0
+    else:
+        _, commission, tax = cost_model.sell_costs(ticker, shares, reference_price)
+
+    notional = fill_price * shares
+    return {
+        "timestamp": pd.Timestamp(bar_batch.date),
+        "ticker": ticker,
+        "side": side,
+        "shares": shares,
+        "fill_price": float(fill_price),
+        "commission": float(commission),
+        "tax": float(tax),
+        "notional": float(notional),
+        "total_cost": float(commission) + float(tax),
+    }
+
+
 class PaperSession:
     _next_session_seq: ClassVar[int] = 0
 
@@ -278,12 +305,15 @@ class PaperSession:
         last_raw_close: dict[str, Decimal] = {}
         equity_curve: dict[date, Decimal] = {}
         positions_rows: list[dict] = []
+        trades_rows: list[dict] = []
 
         def _advance_and_mark(bar_batch: BarBatch, *, is_last: bool = False) -> None:
             self.broker.process_bar(bar_batch)
             events = self.broker.drain_events()
             for e in events:
                 self.event_log.append(e)
+                if e.kind in (EventKind.FILL, EventKind.PARTIAL_FILL):
+                    trades_rows.append(_trade_row(e, bar_batch, self.cost_model))
             fold(events, into=self.account)
             if is_last:
                 # No later bar's SETTLE will ever flush this bar's own net
@@ -323,6 +353,25 @@ class PaperSession:
                 index=pd.MultiIndex.from_tuples([], names=["date", "ticker"]),
             )
 
+        trades_df = (
+            pd.DataFrame(trades_rows)
+            if trades_rows
+            else pd.DataFrame(
+                columns=[
+                    "timestamp",
+                    "ticker",
+                    "side",
+                    "shares",
+                    "fill_price",
+                    "commission",
+                    "tax",
+                    "notional",
+                    "total_cost",
+                ]
+            )
+        )
+        slippage_pct = self.cost_model.slippage_bps_per_side / 10_000
+
         return SimResult(
             strategy_name=self.strategy.name,
             tickers=tuple(self.tickers),
@@ -331,11 +380,15 @@ class PaperSession:
             initial_capital=self.broker.capital,
             final_equity=equity_curve[batches[-1].date],
             equity_curve=pd.Series(equity_curve),
-            trades=pd.DataFrame(),
+            trades=trades_df,
             positions_daily=positions_daily,
-            total_commission=Decimal(0),
-            total_tax=Decimal(0),
-            total_slippage_cost=Decimal(0),
+            total_commission=Decimal(str(trades_df["commission"].sum()))
+            if trades_rows
+            else Decimal(0),
+            total_tax=Decimal(str(trades_df["tax"].sum())) if trades_rows else Decimal(0),
+            total_slippage_cost=Decimal(str((trades_df["notional"] * slippage_pct).sum()))
+            if trades_rows
+            else Decimal(0),
             event_log_path=self.event_log.path,
         )
 
