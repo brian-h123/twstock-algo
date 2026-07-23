@@ -128,7 +128,10 @@ class BrokerSimulator(BrokerBase):
     def _reject(self, order: Order, ts: date, reason: RejectionReason) -> None:
         self._emit(
             BrokerEvent(
-                ts, kind=EventKind.REJECT, order_id=order.order_id, payload={"reason": reason.value}
+                ts,
+                kind=EventKind.REJECT,
+                order_id=order.order_id,
+                payload={"ticker": order.ticker, "reason": reason.value},
             )
         )
         del self._working_orders[order.order_id]
