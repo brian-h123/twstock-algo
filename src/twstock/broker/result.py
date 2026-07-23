@@ -20,4 +20,6 @@ class SimResult:
     total_commission: Decimal
     total_tax: Decimal
     total_slippage_cost: Decimal
+    settled_cash_curve: pd.Series  # DatedLedger.settled_cash at each bar's mark point
+    unsettled_cash_curve: pd.Series  # pending sum + bar_net at each bar's mark point
     event_log_path: Path

@@ -316,6 +316,72 @@ def test_trades_empty_for_a_run_with_no_decision_bars() -> None:
     assert result.total_slippage_cost == Decimal(0)
 
 
+# ─── SimResult cash curves ──────────────────────────────────────────────────
+
+
+def _market_value_by_date(result) -> pd.Series:
+    if result.positions_daily.empty:
+        return pd.Series(Decimal(0), index=result.equity_curve.index)
+    return (
+        result.positions_daily["market_value"]
+        .groupby(level="date")
+        .sum()
+        .reindex(result.equity_curve.index, fill_value=Decimal(0))
+    )
+
+
+def test_cash_curves_reconcile_with_equity_under_instant_settlement(monkeypatch) -> None:
+    """settled + unsettled + position market value must reproduce equity_curve
+    exactly at every bar -- this is the same composition Account.total_value()
+    itself uses, so the two new curves must never silently drift from it."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    session = PaperSession(**_default_kwargs(feed))
+
+    result = session.run()
+
+    market_value = _market_value_by_date(result)
+    reconstructed = result.settled_cash_curve + result.unsettled_cash_curve + market_value
+    assert (reconstructed == result.equity_curve).all()
+
+
+def test_unsettled_cash_curve_is_zero_under_instant_settlement(monkeypatch) -> None:
+    """InstantSettlement never touches DatedLedger.pending/bar_net, so the
+    unsettled curve must stay exactly zero throughout -- the backtester's own
+    settlement model should show no float reliance at all."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    session = PaperSession(**_default_kwargs(feed))
+
+    result = session.run()
+
+    assert (result.unsettled_cash_curve == Decimal(0)).all()
+
+
+def test_unsettled_cash_curve_nonzero_under_netting_settlement(monkeypatch) -> None:
+    """Under NettingSettlement, trade proceeds sit in bar_net/pending until
+    T+2 -- some point in the run must show nonzero unsettled cash, otherwise
+    the curve isn't actually observing the float NettingSettlement defers."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    kwargs = _default_kwargs(feed)
+    kwargs["settlement"] = NettingSettlement()
+    session = PaperSession(**kwargs)
+
+    result = session.run()
+
+    market_value = _market_value_by_date(result)
+    reconstructed = result.settled_cash_curve + result.unsettled_cash_curve + market_value
+    assert (reconstructed == result.equity_curve).all()
+    assert (result.unsettled_cash_curve != Decimal(0)).any()
+
+
 # ─── Integration: single-asset SMA replay, real data ───────────────────────────
 
 

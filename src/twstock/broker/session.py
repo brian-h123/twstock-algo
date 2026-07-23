@@ -304,6 +304,8 @@ class PaperSession:
     ) -> SimResult:
         last_raw_close: dict[str, Decimal] = {}
         equity_curve: dict[date, Decimal] = {}
+        settled_cash_curve: dict[date, Decimal] = {}
+        unsettled_cash_curve: dict[date, Decimal] = {}
         positions_rows: list[dict] = []
         trades_rows: list[dict] = []
 
@@ -322,6 +324,10 @@ class PaperSession:
                 self.account.settlement.close(self.account._ledger)
             last_raw_close.update({t: bar.close for t, bar in bar_batch.bars.items()})
             equity_curve[bar_batch.date] = self.account.total_value(prices=last_raw_close)
+            dated_ledger = self.account._ledger
+            settled_cash_curve[bar_batch.date] = dated_ledger.settled_cash
+            pending_sum = sum((cf.amount for cf in dated_ledger.pending), Decimal(0))
+            unsettled_cash_curve[bar_batch.date] = pending_sum + dated_ledger.bar_net
             for ticker, ledger in self.account.positions.items():
                 if ledger.open_shares:
                     positions_rows.append(
@@ -389,6 +395,8 @@ class PaperSession:
             total_slippage_cost=Decimal(str((trades_df["notional"] * slippage_pct).sum()))
             if trades_rows
             else Decimal(0),
+            settled_cash_curve=pd.Series(settled_cash_curve),
+            unsettled_cash_curve=pd.Series(unsettled_cash_curve),
             event_log_path=self.event_log.path,
         )
 
