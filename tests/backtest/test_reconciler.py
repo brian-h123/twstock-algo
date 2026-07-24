@@ -6,6 +6,9 @@ All tests run without network calls or disk I/O.
 
 reconcile() coverage:
   - All sell orders precede all buy orders in the returned list
+  - Sells and buys are each sorted by ticker within their group -- the
+    all_tickers set() used to leak Python's per-process string hash order
+    into submission order (ADR 0013)
   - Share sizing: floor(equity × weight / price), not round
   - Ticker held but not targeted → full-position sell
   - Ticker targeted but not held → full buy
@@ -20,6 +23,7 @@ budget_weights() coverage:
   - Same-bar sell proceeds are credited before scaling buys (the rotation case)
   - A buy scaled below 1 share + the commission floor is dropped to zero
     and recorded as a CashShortfall
+  - shortfalls are sorted by ticker, same set()-order fix as reconcile() (ADR 0013)
   - equity <= 0 / no buys at all → early return, unchanged weights, no shortfalls
   - Ticker missing from prices is excluded from the cash math entirely
 """
@@ -64,6 +68,25 @@ def test_all_sells_precede_all_buys() -> None:
     assert sell_indices, "expected at least one sell order"
     assert buy_indices, "expected at least one buy order"
     assert max(sell_indices) < min(buy_indices), "all sells must precede all buys"
+
+
+def test_orders_are_sorted_by_ticker_within_each_side() -> None:
+    """Sells and buys must each be ticker-sorted, not just sells-before-buys
+    as a group (ADR 0013). Before the fix, all_tickers was a set(), whose
+    iteration order depends on Python's per-process string hash
+    randomization -- ticker pairs chosen here in reverse of alphabetical
+    order would previously have come out in either order depending on the
+    process's hash seed, silently reordering same-bar cash contention."""
+    portfolio = _portfolio(equity=100_000, positions={"Z": 100, "M": 50})
+    target_weights = pd.Series({"B": 0.10, "A": 0.10})  # exit Z+M, enter A+B
+    prices = {"Z": 100.0, "M": 100.0, "A": 100.0, "B": 100.0}
+
+    orders = reconcile(target_weights, portfolio, prices)
+
+    sells = [o.ticker for o in orders if o.side == "sell"]
+    buys = [o.ticker for o in orders if o.side == "buy"]
+    assert sells == sorted(sells) == ["M", "Z"]
+    assert buys == sorted(buys) == ["A", "B"]
 
 
 # ─── Share sizing ─────────────────────────────────────────────────────────────
@@ -287,6 +310,26 @@ def test_budget_weights_drops_buy_below_min_viable_notional() -> None:
     assert adjusted["A"] == pytest.approx(0.0)
 
     assert 0.0 < by_ticker["B"].allocated_notional < by_ticker["B"].target_notional
+
+
+def test_shortfalls_are_sorted_by_ticker() -> None:
+    """shortfalls order must be deterministic (ticker-sorted), not dependent
+    on set() iteration order (ADR 0013)."""
+    target_weights = pd.Series({"Z": 0.20, "M": 0.20, "A": 0.20})
+    current_weights = pd.Series(dtype=float)
+    prices = {"Z": 100.0, "M": 100.0, "A": 100.0}
+
+    _, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=1_000_000,
+        gross_buying_power=1,  # forces every buy below the min-viable floor
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    tickers = [s.ticker for s in shortfalls]
+    assert tickers == sorted(tickers) == ["A", "M", "Z"]
 
 
 # ─── Early-return guards ───────────────────────────────────────────────────────

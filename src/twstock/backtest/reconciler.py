@@ -39,7 +39,13 @@ def budget_weights(
     if equity <= 0:
         return target_weights, []
 
-    all_tickers = (set(target_weights.index) | set(current_weights.index)) & set(prices.keys())
+    # sorted(): set union/intersection order depends on Python's per-process
+    # string hash randomization -- without this, allocated/shortfalls order
+    # (and, transitively, reconcile()'s submission order) is nondeterministic
+    # across runs (ADR 0013).
+    all_tickers = sorted(
+        (set(target_weights.index) | set(current_weights.index)) & set(prices.keys())
+    )
 
     target_notional = {t: equity * target_weights.get(t, 0) for t in all_tickers}
     current_notional = {t: equity * current_weights.get(t, 0) for t in all_tickers}
@@ -99,7 +105,10 @@ def reconcile(
     shares = floor(equity * weight / price). Odd-lot sizing (ADR 0006 §7)."""
 
     clean_weights = target_weights.fillna(0.0)
-    all_tickers = set(portfolio.positions.keys()) | set(clean_weights.index)
+    # sorted(): fixes the within-sells / within-buys submission order, which
+    # otherwise depends on Python's per-process string hash randomization
+    # (ADR 0013) -- the sells-before-buys invariant itself is unaffected.
+    all_tickers = sorted(set(portfolio.positions.keys()) | set(clean_weights.index))
 
     sells = []
     buys = []
