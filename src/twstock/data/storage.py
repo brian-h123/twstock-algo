@@ -121,14 +121,22 @@ def write_corporate_actions(ticker: str, df: pd.DataFrame) -> None:
     tmp.replace(path)
 
 
-def read_corporate_actions(ticker: str) -> pd.DataFrame:
+def read_corporate_actions(
+    ticker: str, start: date | None = None, end: date | None = None
+) -> pd.DataFrame:
     path = _ca_path(ticker)
 
     if not path.exists():
         return pd.DataFrame(columns=["ex_date", "ticker", "action_type", "cash_amount", "ratio"])
 
     df = pd.read_parquet(path)
-    return df
+
+    if start is not None:
+        df = df[df["ex_date"] >= pd.Timestamp(start)]
+    if end is not None:
+        df = df[df["ex_date"] <= pd.Timestamp(end)]
+
+    return df.reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------

@@ -252,6 +252,46 @@ def test_read_ca_missing_ticker_returns_empty_df(storage_dir):
         assert col in result.columns
 
 
+def test_read_ca_no_filters_returns_all_rows(storage_dir):
+    write_corporate_actions("2330", _make_ca(ex_dates=("2023-01-03", "2023-01-04", "2023-01-05")))
+    result = read_corporate_actions("2330")
+    assert len(result) == 3
+
+
+def test_read_ca_start_filter_excludes_earlier_actions(storage_dir):
+    write_corporate_actions("2330", _make_ca(ex_dates=("2023-01-03", "2023-01-04", "2023-01-05")))
+    from datetime import date
+
+    result = read_corporate_actions("2330", start=date(2023, 1, 4))
+    assert len(result) == 2
+    assert result["ex_date"].min() == pd.Timestamp("2023-01-04")
+
+
+def test_read_ca_end_filter_excludes_later_actions(storage_dir):
+    """The regression this guards: an action recorded after `end` (e.g. a
+    dividend declared in a later year) must not be returned when querying a
+    historical window -- adjust() would otherwise back-adjust the entire
+    window using an action the window's own end date knows nothing about."""
+    write_corporate_actions("2330", _make_ca(ex_dates=("2023-01-03", "2023-01-04", "2023-01-05")))
+    from datetime import date
+
+    result = read_corporate_actions("2330", end=date(2023, 1, 4))
+    assert len(result) == 2
+    assert result["ex_date"].max() == pd.Timestamp("2023-01-04")
+
+
+def test_read_ca_both_filters_returns_window(storage_dir):
+    write_corporate_actions(
+        "2330", _make_ca(ex_dates=("2023-01-03", "2023-01-04", "2023-01-05", "2023-01-06"))
+    )
+    from datetime import date
+
+    result = read_corporate_actions("2330", start=date(2023, 1, 4), end=date(2023, 1, 5))
+    assert len(result) == 2
+    assert result["ex_date"].min() == pd.Timestamp("2023-01-04")
+    assert result["ex_date"].max() == pd.Timestamp("2023-01-05")
+
+
 # ---------------------------------------------------------------------------
 # helpers — suspensions
 # ---------------------------------------------------------------------------
