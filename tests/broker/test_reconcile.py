@@ -153,7 +153,13 @@ def _reject(order_id: str, ticker: str, reason: RejectionReason, ts: date = _DAT
 
 
 def _partial_fill(
-    order_id: str, ticker: str, side: str, shares: int, fill_price: Decimal, ts: date = _DATE
+    order_id: str,
+    ticker: str,
+    side: str,
+    shares: int,
+    fill_price: Decimal,
+    ts: date = _DATE,
+    cause: str = "liquidity",
 ) -> BrokerEvent:
     return BrokerEvent(
         ts=ts,
@@ -165,6 +171,7 @@ def _partial_fill(
             "shares": str(shares),
             "fill_price": str(fill_price),
             "total_cost": "60",
+            "cause": cause,
         },
     )
 
@@ -216,6 +223,21 @@ def test_partial_fill_row_has_ticker_and_computed_notional_gap() -> None:
     assert row["requested"] == 1000
     assert row["filled"] == 600
     assert row["notional_gap"] == (1000 - 600) * 100.05
+
+
+def test_partial_fill_row_reads_cause_from_payload() -> None:
+    """ADR 0011 D2 follow-up: a cash-ceiling underfill must surface its own
+    label, not be flattened to "liquidity" by the audit builder."""
+    events = [
+        _submitted("O2", 1000),
+        _partial_fill(
+            "O2", "2330", "buy", 600, Decimal("100.05"), cause="insufficient_buying_power"
+        ),
+    ]
+
+    audit = _build_order_audit(events)
+
+    assert audit.iloc[0]["cause"] == "insufficient_buying_power"
 
 
 def test_fully_filled_order_produces_no_audit_row() -> None:
@@ -317,6 +339,49 @@ def test_liquidity_underfill_line_sums_only_liquidity_rows() -> None:
     assert line.value == Decimal("40000") / Decimal("1000000")
     assert line.category == "accepted_divergence"
     assert line.ok is True
+
+
+def test_liquidity_underfill_line_also_sums_cash_ceiling_rows() -> None:
+    """ADR 0011 D2 follow-up: a cash-ceiling underfill ("insufficient_buying_
+    power") is still accepted-divergence friction, distinct in label from a
+    volume-ceiling one but not excluded from the aggregate missed-notional
+    line -- only a hard REJECT (zero fill, e.g. price_limit_lock) is."""
+    sim = _sim_result(initial_capital=Decimal("1000000"))
+    order_audit = pd.DataFrame(
+        [
+            {
+                "order_id": OrderId("O1"),
+                "date": _DATE,
+                "ticker": "2330",
+                "cause": "liquidity",
+                "requested": 1000,
+                "filled": 600,
+                "notional_gap": 40_000.0,
+            },
+            {
+                "order_id": OrderId("O2"),
+                "date": _DATE,
+                "ticker": "2317",
+                "cause": "insufficient_buying_power",
+                "requested": 500,
+                "filled": 300,
+                "notional_gap": 20_000.0,
+            },
+            {
+                "order_id": OrderId("O3"),
+                "date": _DATE,
+                "ticker": "2454",
+                "cause": RejectionReason.PRICE_LIMIT_LOCK.value,
+                "requested": 200,
+                "filled": 0,
+                "notional_gap": None,
+            },
+        ]
+    )
+
+    line = _liquidity_underfill_line(sim, order_audit)
+
+    assert line.value == Decimal("60000") / Decimal("1000000")
 
 
 def test_liquidity_underfill_line_zero_when_no_liquidity_rows() -> None:

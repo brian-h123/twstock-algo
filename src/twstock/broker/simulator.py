@@ -137,7 +137,13 @@ class BrokerSimulator(BrokerBase):
         del self._working_orders[order.order_id]
 
     def _fill(
-        self, order: Order, ts: date, reference_price: Decimal, executed: int, remaining: int
+        self,
+        order: Order,
+        ts: date,
+        reference_price: Decimal,
+        executed: int,
+        remaining: int,
+        binding_ceiling: str,
     ) -> None:
         if order.side == Side.BUY:
             fill_price, commission = self.cost_model.buy_costs(
@@ -151,20 +157,21 @@ class BrokerSimulator(BrokerBase):
             total_cost = Decimal(str(commission)) + Decimal(str(tax))
 
         kind = EventKind.FILL if executed == remaining else EventKind.PARTIAL_FILL
-        self._emit(
-            BrokerEvent(
-                ts,
-                kind,
-                order_id=order.order_id,
-                payload={
-                    "ticker": order.ticker,
-                    "side": order.side.value,
-                    "shares": str(executed),
-                    "fill_price": str(Decimal(str(fill_price))),
-                    "total_cost": str(total_cost),
-                },
-            )
-        )
+        payload = {
+            "ticker": order.ticker,
+            "side": order.side.value,
+            "shares": str(executed),
+            "fill_price": str(Decimal(str(fill_price))),
+            "total_cost": str(total_cost),
+        }
+        if kind == EventKind.PARTIAL_FILL:
+            # ADR 0011 D2 follow-up: distinguish a volume-capped underfill
+            # ("liquidity") from a cash-capped one (order.py's
+            # RejectionReason.INSUFFICIENT_BUYING_POWER, reused here rather
+            # than a bespoke string since it's the same underlying
+            # constraint just short of a full reject).
+            payload["cause"] = binding_ceiling
+        self._emit(BrokerEvent(ts, kind, order_id=order.order_id, payload=payload))
         if kind == EventKind.PARTIAL_FILL:
             self._emit(BrokerEvent(ts, kind=EventKind.EXPIRE, order_id=order.order_id, payload={}))
 
@@ -206,8 +213,17 @@ class BrokerSimulator(BrokerBase):
                 ceiling=volume_ceiling,
             )
             executed = min(volume_ceiling, cash_ceiling)
+            binding_ceiling = (
+                RejectionReason.INSUFFICIENT_BUYING_POWER.value
+                if cash_ceiling < volume_ceiling
+                else "liquidity"
+            )
         else:
+            # Sells are never cash-constrained: proceeds only ever add to
+            # buying power, so the volume/participation cap is the sole
+            # ceiling (confirmed empirically, ADR 0011 D2 follow-up).
             executed = volume_ceiling
+            binding_ceiling = "liquidity"
 
         if executed == 0:
             reason = RejectionReason.INSUFFICIENT_BUYING_POWER if order.side == Side.BUY else None
@@ -215,7 +231,7 @@ class BrokerSimulator(BrokerBase):
             self._reject(order, bar_batch.date, reason)
             return
 
-        self._fill(order, bar_batch.date, bar.open, executed, remaining)
+        self._fill(order, bar_batch.date, bar.open, executed, remaining, binding_ceiling)
 
     def process_bar(self, bar_batch: BarBatch) -> None:
         if not _XTAI.is_session(pd.Timestamp(bar_batch.date)):

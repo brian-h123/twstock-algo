@@ -8,7 +8,16 @@ from twstock.backtest.cost_model import TaiwanCostModel
 from twstock.backtest.result import BacktestResult
 from twstock.backtest.tearsheet import tear_sheet
 from twstock.broker.events import BrokerEvent, EventKind, EventLog
+from twstock.broker.rejection import RejectionReason
 from twstock.broker.result import SimResult
+
+# ADR 0011 D2 follow-up: a PARTIAL_FILL's cause is either the volume/
+# participation cap ("liquidity") or the cash ceiling (reuses
+# RejectionReason.INSUFFICIENT_BUYING_POWER's string -- same underlying
+# constraint as the zero-fill REJECT case, just short of a full reject).
+# Both are accepted-divergence friction from the sim's account-state model,
+# which the frictionless Engine reference has no equivalent of.
+_UNDERFILL_CAUSES = frozenset({"liquidity", RejectionReason.INSUFFICIENT_BUYING_POWER.value})
 
 
 @dataclass(frozen=True)
@@ -58,7 +67,8 @@ def _headline_diff(sim: SimResult, reference: BacktestResult) -> pd.DataFrame:
 
 def _build_order_audit(events: list[BrokerEvent]) -> pd.DataFrame:
     """One row per order that didn't fully fill cleanly: REJECT (exact
-    RejectionReason) or PARTIAL_FILL (defaulted to "liquidity" per ADR 0011 D2)."""
+    RejectionReason) or PARTIAL_FILL (exact binding ceiling -- "liquidity" or
+    "insufficient_buying_power", ADR 0011 D2 follow-up)."""
     submitted = {
         e.order_id: int(e.payload["quantity"]) for e in events if e.kind == EventKind.SUBMITTED
     }
@@ -84,7 +94,7 @@ def _build_order_audit(events: list[BrokerEvent]) -> pd.DataFrame:
                     "order_id": e.order_id,
                     "date": e.ts,
                     "ticker": e.payload["ticker"],
-                    "cause": "liquidity",
+                    "cause": e.payload["cause"],
                     "requested": submitted[e.order_id],
                     "filled": filled,
                     "notional_gap": gap * float(e.payload["fill_price"]),
@@ -98,11 +108,17 @@ def _build_order_audit(events: list[BrokerEvent]) -> pd.DataFrame:
 
 
 def _liquidity_underfill_line(sim: SimResult, order_audit: pd.DataFrame) -> WaterfallLine:
-    """Total missed notional from liquidity-capped orders, as a fraction of
-    initial capital. This is a FRICTION MAGNITUDE, not an estimated return
-    contribution -- ADR 0011 D1 folds it into the residual as-is, deliberately
-    not attempting a counterfactual "what would those shares have earned"."""
-    gap = Decimal(str(order_audit.loc[order_audit["cause"] == "liquidity", "notional_gap"].sum()))
+    """Total missed notional from partial fills, as a fraction of initial
+    capital -- both volume-capped ("liquidity") and cash-capped
+    ("insufficient_buying_power") underfills, per ADR 0011 D2's follow-up
+    distinguishing the two causes in the audit while still treating both as
+    the same class of accepted, sim-only friction. This is a FRICTION
+    MAGNITUDE, not an estimated return contribution -- ADR 0011 D1 folds it
+    into the residual as-is, deliberately not attempting a counterfactual
+    "what would those shares have earned"."""
+    gap = Decimal(
+        str(order_audit.loc[order_audit["cause"].isin(_UNDERFILL_CAUSES), "notional_gap"].sum())
+    )
     value = gap / sim.initial_capital
     return WaterfallLine(
         name="liquidity_underfill",

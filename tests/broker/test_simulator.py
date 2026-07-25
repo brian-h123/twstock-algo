@@ -353,6 +353,8 @@ class TestFill:
         assert kinds == [EventKind.SUBMITTED, EventKind.PARTIAL_FILL, EventKind.EXPIRE]
         assert b.query(OrderId("o2")).status == OrderStatus.EXPIRED
         assert OrderId("o2") not in b._working_orders
+        partial = next(e for e in events if e.kind == EventKind.PARTIAL_FILL)
+        assert partial.payload["cause"] == "liquidity"
 
 
 # ── _resolve_order / process_bar: rejection paths ───────────────────────────
@@ -440,6 +442,37 @@ class TestInsufficientBuyingPower:
         state = b.query(OrderId("o1"))
         assert state.status == OrderStatus.EXPIRED
         assert 0 < state.filled_quantity < 1000
+
+    def test_partial_cash_affordability_labels_cause_insufficient_buying_power(self):
+        """ADR 0011 D2 follow-up: a cash-ceiling underfill must not be
+        mislabeled "liquidity" -- the volume/participation cap never bound
+        here (capital, not volume, is what's scarce)."""
+        b = _broker(capital="50100")
+        b.submit(_order(order_id="o1", quantity=1000, decided_at=_T1))
+        b.process_bar(_batch(_T2, _bar(d=_T2, price="100")))
+        partial = next(
+            e
+            for e in b.drain_events()
+            if e.kind == EventKind.PARTIAL_FILL and e.order_id == OrderId("o1")
+        )
+        assert partial.payload["cause"] == RejectionReason.INSUFFICIENT_BUYING_POWER.value
+
+    def test_volume_cap_below_cash_ceiling_labels_cause_liquidity(self):
+        """When plenty of cash is available but the participation cap binds
+        first, the cause must read "liquidity", not the cash-ceiling label --
+        confirms the binding_ceiling comparison picks the correct side."""
+        b = _broker(
+            capital="100000000", fill_model=VolumeParticipationFiller(participation_rate=0.05)
+        )
+        b.process_bar(_batch(_T1, _bar(d=_T1, volume=100_000)))
+        b.submit(_order(order_id="o1", quantity=100_000, decided_at=_T1))
+        b.process_bar(_batch(_T2, _bar(d=_T2, volume=100_000, price="100")))
+        partial = next(
+            e
+            for e in b.drain_events()
+            if e.kind == EventKind.PARTIAL_FILL and e.order_id == OrderId("o1")
+        )
+        assert partial.payload["cause"] == "liquidity"
 
     def test_sell_is_never_cash_constrained(self):
         b = _broker(capital="1000000")
