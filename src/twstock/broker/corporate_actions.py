@@ -25,14 +25,16 @@ DatedMutation = ShareMutation | CashMutation
 def share_multiplier(action: CorporateAction) -> float:
     """New shares per old share, in LotLedger.on_split()'s convention.
 
-    Valid only for STOCK_SPLIT, STOCK_DIVIDEND, and CASH_AND_STOCK_DIVIDEND
-    (the three action types with a multiplicative share effect). Raises for
-    any other action_type — callers must branch on action_type before
-    calling this, not use it as a catch-all.
+    Valid only for STOCK_SPLIT, CAPITAL_REDUCTION, STOCK_DIVIDEND, and
+    CASH_AND_STOCK_DIVIDEND (the four action types with a multiplicative
+    share effect). CAPITAL_REDUCTION shares STOCK_SPLIT's ratio convention
+    and formula (post_price / prior_price; ADR 0007, ADR 0012) rather than
+    getting its own branch. Raises for any other action_type — callers must
+    branch on action_type before calling this, not use it as a catch-all.
     """
-    if action.action_type == ActionType.STOCK_SPLIT:
+    if action.action_type in (ActionType.STOCK_SPLIT, ActionType.CAPITAL_REDUCTION):
         if action.ratio is None or action.ratio <= 0:
-            raise ValueError(f"STOCK_SPLIT action has invalid ratio: {action}")
+            raise ValueError(f"{action.action_type} action has invalid ratio: {action}")
         return 1.0 / action.ratio
     elif action.action_type in (ActionType.STOCK_DIVIDEND, ActionType.CASH_AND_STOCK_DIVIDEND):
         if action.ratio is None or action.ratio <= 0:
@@ -46,10 +48,17 @@ def decompose(action: CorporateAction, position: LotLedger, t: date) -> list[Dat
     """Decompose one corporate action into dated mutations against position.
 
     A no-op on a flat position: with nothing held, no share or cash
-    entitlement can accrue, so an unmodeled action_type (RIGHTS_ISSUE,
-    CAPITAL_REDUCTION) is also silently skipped rather than raised in that
-    case. STOCK_SPLIT and STOCK_DIVIDEND produce a ShareMutation effective
-    at t (the ex-date). CASH_DIVIDEND produces a CashMutation sized off
+    entitlement can accrue. RIGHTS_ISSUE is always a no-op, held or flat:
+    the lapse assumption (ADR 0012) treats the shareholder as neither
+    subscribing nor selling the rights, so no share or cash mutation
+    occurs — dilution is already reflected for free in the raw market
+    price used for mark-to-market (the same treatment data/adjustments.py
+    already applies on the signal side). STOCK_SPLIT, STOCK_DIVIDEND, and
+    CAPITAL_REDUCTION produce a ShareMutation effective at t (the ex-date)
+    — CAPITAL_REDUCTION shares STOCK_SPLIT's ratio convention and formula
+    (ADR 0007, ADR 0012), not a lapse: every shareholder's share count
+    changes automatically, so unlike RIGHTS_ISSUE there is no "do nothing"
+    reading of the event. CASH_DIVIDEND produces a CashMutation sized off
     position.open_shares and settling at action.pay_date.
     CASH_AND_STOCK_DIVIDEND produces both. Pure: does not mutate position.
 
@@ -66,21 +75,20 @@ def decompose(action: CorporateAction, position: LotLedger, t: date) -> list[Dat
         whether position is flat.
 
     Raises:
-        ValueError: If action_type is RIGHTS_ISSUE or CAPITAL_REDUCTION on
-            a held position (D15: unmodeled, evidence-gated); or if a
-            cash-bearing action is missing cash_amount or pay_date; or if
-            a share-bearing action has an invalid ratio (via
-            share_multiplier).
+        ValueError: If a cash-bearing action is missing cash_amount or
+            pay_date; or if a share-bearing action has an invalid ratio
+            (via share_multiplier).
     """
     mutations: list[DatedMutation] = []
+    if action.action_type == ActionType.RIGHTS_ISSUE:
+        return []
     if position.open_shares == 0:
         return []
-    if action.action_type in (ActionType.RIGHTS_ISSUE, ActionType.CAPITAL_REDUCTION):
-        raise ValueError(f"unmodeled action type for decompose: {action.action_type}")
     if action.action_type in (
         ActionType.STOCK_SPLIT,
         ActionType.STOCK_DIVIDEND,
         ActionType.CASH_AND_STOCK_DIVIDEND,
+        ActionType.CAPITAL_REDUCTION,
     ):
         mutations.append(ShareMutation(ratio=share_multiplier(action), effective_date=t))
     if action.action_type in (ActionType.CASH_DIVIDEND, ActionType.CASH_AND_STOCK_DIVIDEND):

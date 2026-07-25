@@ -82,18 +82,20 @@ def _cash_and_stock_dividend(
     )
 
 
-def _rights_issue(ex_date: date) -> CorporateAction:
+def _rights_issue(
+    ex_date: date, ratio: float | None = 1.0, subscription_price: str | None = "10"
+) -> CorporateAction:
     return CorporateAction(
         action_type=ActionType.RIGHTS_ISSUE,
         ex_date=ex_date,
         cash_amount=None,
-        ratio=1.0,
+        ratio=ratio,
         pay_date=None,
-        subscription_price=Decimal("10"),
+        subscription_price=Decimal(subscription_price) if subscription_price is not None else None,
     )
 
 
-def _capital_reduction(ex_date: date, ratio: float = 0.5) -> CorporateAction:
+def _capital_reduction(ex_date: date, ratio: float | None = 0.5) -> CorporateAction:
     return CorporateAction(
         action_type=ActionType.CAPITAL_REDUCTION,
         ex_date=ex_date,
@@ -273,6 +275,35 @@ class TestCorporateActionAdjustment:
         dpl.observe(_bar(d=date(2026, 1, 2), close="100.00", actions=()))
         assert dpl.band("2330", date(2026, 1, 2)) == (Decimal("90.0"), Decimal("110.0"))
 
+    def test_capital_reduction_scales_reference_by_inverse_ratio(self):
+        """ADR 0012: CAPITAL_REDUCTION shares STOCK_SPLIT's ratio convention
+        (post_price / prior_price, ADR 0007) and formula, not its own branch.
+        ratio=2.0 -> reference doubles (fewer shares, higher price)."""
+        dpl = DerivedPriceLimits()
+        dpl.observe(_bar(d=date(2026, 1, 1), close="100.00"))
+        dpl.observe(
+            _bar(
+                d=date(2026, 1, 2),
+                close="200.00",
+                actions=(_capital_reduction(date(2026, 1, 2), ratio=2.0),),
+            )
+        )
+        assert dpl.band("2330", date(2026, 1, 2)) == (Decimal("180.0"), Decimal("220.0"))
+
+    def test_rights_issue_applies_terp_formula(self):
+        """ADR 0012: lapse assumption. TERP = (prior_close + ratio *
+        subscription_price) / (1 + ratio) = (100 + 0.5*40) / 1.5 = 80."""
+        dpl = DerivedPriceLimits()
+        dpl.observe(_bar(d=date(2026, 1, 1), close="100.00"))
+        dpl.observe(
+            _bar(
+                d=date(2026, 1, 2),
+                close="80.00",
+                actions=(_rights_issue(date(2026, 1, 2), ratio=0.5, subscription_price="40"),),
+            )
+        )
+        assert dpl.band("2330", date(2026, 1, 2)) == (Decimal("72.0"), Decimal("88.0"))
+
 
 # ── corporate-action validation ───────────────────────────────────────────────
 
@@ -330,17 +361,42 @@ class TestCorporateActionValidation:
                 )
             )
 
-    def test_rights_issue_raises_as_unmodeled(self):
+    def test_rights_issue_with_none_ratio_raises(self):
         dpl = DerivedPriceLimits()
         dpl.observe(_bar(d=date(2026, 1, 1), close="100.00"))
         with pytest.raises(ValueError):
-            dpl.observe(_bar(d=date(2026, 1, 2), actions=(_rights_issue(date(2026, 1, 2)),)))
+            dpl.observe(
+                _bar(d=date(2026, 1, 2), actions=(_rights_issue(date(2026, 1, 2), ratio=None),))
+            )
 
-    def test_capital_reduction_raises_as_unmodeled(self):
+    def test_rights_issue_with_none_subscription_price_raises(self):
         dpl = DerivedPriceLimits()
         dpl.observe(_bar(d=date(2026, 1, 1), close="100.00"))
         with pytest.raises(ValueError):
-            dpl.observe(_bar(d=date(2026, 1, 2), actions=(_capital_reduction(date(2026, 1, 2)),)))
+            dpl.observe(
+                _bar(
+                    d=date(2026, 1, 2),
+                    actions=(_rights_issue(date(2026, 1, 2), subscription_price=None),),
+                )
+            )
+
+    def test_capital_reduction_with_none_ratio_raises(self):
+        dpl = DerivedPriceLimits()
+        dpl.observe(_bar(d=date(2026, 1, 1), close="100.00"))
+        with pytest.raises(ValueError):
+            dpl.observe(
+                _bar(
+                    d=date(2026, 1, 2), actions=(_capital_reduction(date(2026, 1, 2), ratio=None),)
+                )
+            )
+
+    def test_capital_reduction_with_zero_ratio_raises(self):
+        dpl = DerivedPriceLimits()
+        dpl.observe(_bar(d=date(2026, 1, 1), close="100.00"))
+        with pytest.raises(ValueError):
+            dpl.observe(
+                _bar(d=date(2026, 1, 2), actions=(_capital_reduction(date(2026, 1, 2), ratio=0),))
+            )
 
 
 # ── SuspensionCalendar ─────────────────────────────────────────────────────────

@@ -65,7 +65,14 @@ def _round_to_tick(price: Decimal, *, direction: Literal["up", "down"]) -> Decim
 def _ex_day_reference(prior_close: Decimal, actions: tuple[CorporateAction, ...]) -> Decimal:
     reference_price = prior_close
     for action in actions:
-        if action.action_type in (ActionType.STOCK_SPLIT, ActionType.STOCK_DIVIDEND):
+        if action.action_type in (
+            ActionType.STOCK_SPLIT,
+            ActionType.STOCK_DIVIDEND,
+            ActionType.CAPITAL_REDUCTION,
+        ):
+            # CAPITAL_REDUCTION shares STOCK_SPLIT's ratio convention and
+            # formula (post_price / prior_price, ADR 0007) -- same branch,
+            # not a separate one (ADR 0012).
             reference_price = reference_price / Decimal(str(share_multiplier(action)))
         elif action.action_type == ActionType.CASH_DIVIDEND:
             if action.cash_amount is None:
@@ -77,10 +84,16 @@ def _ex_day_reference(prior_close: Decimal, actions: tuple[CorporateAction, ...]
             reference_price = (reference_price - action.cash_amount) / Decimal(
                 str(share_multiplier(action))
             )
-        elif action.action_type in (ActionType.RIGHTS_ISSUE, ActionType.CAPITAL_REDUCTION):
-            raise ValueError(
-                f"unmodeled action type for price-limit reference: {action.action_type}"
-            )
+        elif action.action_type == ActionType.RIGHTS_ISSUE:
+            if action.ratio is None or action.subscription_price is None:
+                raise ValueError(f"RIGHTS_ISSUE action missing ratio/subscription_price: {action}")
+            ratio = Decimal(str(action.ratio))
+            # TWSE ex-rights reference price (TERP), lapse assumption (ADR 0012):
+            # (prior_close + ratio * subscription_price) / (1 + ratio). Mirrors
+            # data/adjustments.py's rights_issue factor, anchored on prior_close
+            # rather than the ex-day's own close so it's derivable before the
+            # day trades.
+            reference_price = (reference_price + ratio * action.subscription_price) / (1 + ratio)
         else:
             raise ValueError(f"unhandled action_type: {action.action_type}")
     return reference_price

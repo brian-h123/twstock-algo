@@ -86,20 +86,28 @@ class TestShareMultiplier:
             == 1.1
         )
 
+    def test_capital_reduction_uses_same_formula_as_stock_split(self):
+        """ADR 0012: CAPITAL_REDUCTION shares STOCK_SPLIT's ratio convention
+        (post_price / prior_price, ADR 0007) — ratio=2.0 -> half as many
+        shares (1 / 2.0), the same shape as a 1:2 reverse split."""
+        assert share_multiplier(_action(ActionType.CAPITAL_REDUCTION, ratio=2.0)) == 0.5
+
     @pytest.mark.parametrize("bad_ratio", [None, 0, -0.5])
     def test_stock_split_invalid_ratio_raises(self, bad_ratio):
         with pytest.raises(ValueError):
             share_multiplier(_action(ActionType.STOCK_SPLIT, ratio=bad_ratio))
+
+    @pytest.mark.parametrize("bad_ratio", [None, 0, -2.0])
+    def test_capital_reduction_invalid_ratio_raises(self, bad_ratio):
+        with pytest.raises(ValueError):
+            share_multiplier(_action(ActionType.CAPITAL_REDUCTION, ratio=bad_ratio))
 
     @pytest.mark.parametrize("bad_ratio", [None, 0, -0.1])
     def test_stock_dividend_invalid_ratio_raises(self, bad_ratio):
         with pytest.raises(ValueError):
             share_multiplier(_action(ActionType.STOCK_DIVIDEND, ratio=bad_ratio))
 
-    @pytest.mark.parametrize(
-        "action_type",
-        [ActionType.CASH_DIVIDEND, ActionType.RIGHTS_ISSUE, ActionType.CAPITAL_REDUCTION],
-    )
+    @pytest.mark.parametrize("action_type", [ActionType.CASH_DIVIDEND, ActionType.RIGHTS_ISSUE])
     def test_undefined_for_non_share_multiplicative_types(self, action_type):
         with pytest.raises(ValueError):
             share_multiplier(_action(action_type))
@@ -109,9 +117,11 @@ class TestShareMultiplier:
 
 
 class TestDecomposeFlatPosition:
-    """With nothing held, no mutation can accrue — including the unmodeled-
-    action raise for RIGHTS_ISSUE/CAPITAL_REDUCTION, which only protects a
-    held position (see decompose's docstring)."""
+    """With nothing held, no share or cash entitlement can accrue for any
+    action type — including CAPITAL_REDUCTION, which otherwise produces a
+    real ShareMutation on a held position (see TestDecomposeCapitalReduction).
+    RIGHTS_ISSUE returns empty regardless of position state (ADR 0012 lapse
+    assumption), so it's included here too."""
 
     @pytest.mark.parametrize("action_type", _ALL_ACTION_TYPES)
     def test_flat_position_returns_empty_regardless_of_action_type(self, action_type):
@@ -255,16 +265,45 @@ class TestDecomposeCombinedDividend:
             decompose(action, position, date(2026, 1, 2))
 
 
-# ── decompose: unmodeled actions ─────────────────────────────────────────────
+# ── decompose: capital reduction (ADR 0012: same path as stock split) ───────
 
 
-class TestDecomposeUnmodeledActions:
-    def test_rights_issue_raises_on_held_position(self):
+class TestDecomposeCapitalReduction:
+    def test_produces_share_mutation_with_inverse_ratio_only(self):
+        position = _position(shares=1000)
+        result = decompose(
+            _action(ActionType.CAPITAL_REDUCTION, ratio=2.0), position, date(2026, 1, 2)
+        )
+        assert result == [ShareMutation(ratio=0.5, effective_date=date(2026, 1, 2))]
+
+    def test_does_not_mutate_position(self):
+        position = _position(shares=1000, price=100.0)
+        open_before, avg_cost_before = position.open_shares, position.avg_cost
+        decompose(_action(ActionType.CAPITAL_REDUCTION, ratio=2.0), position, date(2026, 1, 2))
+        assert position.open_shares == open_before
+        assert position.avg_cost == avg_cost_before
+
+    @pytest.mark.parametrize("bad_ratio", [None, 0, -2.0])
+    def test_invalid_ratio_raises(self, bad_ratio):
         position = _position(shares=1000)
         with pytest.raises(ValueError):
-            decompose(_action(ActionType.RIGHTS_ISSUE, ratio=1.0), position, date(2026, 1, 2))
+            decompose(
+                _action(ActionType.CAPITAL_REDUCTION, ratio=bad_ratio), position, date(2026, 1, 2)
+            )
 
-    def test_capital_reduction_raises_on_held_position(self):
+
+# ── decompose: rights issue (ADR 0012 lapse assumption) ─────────────────────
+
+
+class TestDecomposeRightsIssue:
+    def test_returns_empty_on_held_position(self):
         position = _position(shares=1000)
-        with pytest.raises(ValueError):
-            decompose(_action(ActionType.CAPITAL_REDUCTION, ratio=0.5), position, date(2026, 1, 2))
+        result = decompose(_action(ActionType.RIGHTS_ISSUE, ratio=1.0), position, date(2026, 1, 2))
+        assert result == []
+
+    def test_does_not_mutate_position(self):
+        position = _position(shares=1000, price=100.0)
+        open_before, avg_cost_before = position.open_shares, position.avg_cost
+        decompose(_action(ActionType.RIGHTS_ISSUE, ratio=1.0), position, date(2026, 1, 2))
+        assert position.open_shares == open_before
+        assert position.avg_cost == avg_cost_before
