@@ -38,7 +38,7 @@ def _as_backtest_result(sim: SimResult) -> BacktestResult:
         end=sim.end,
         initial_capital=float(sim.initial_capital),
         final_equity=float(sim.final_equity),
-        equity_curve=sim.equity_curve,
+        equity_curve=sim.equity_curve.astype(float),
         trades=sim.trades,
         positions_daily=sim.positions_daily,
         total_commission=float(sim.total_commission),
