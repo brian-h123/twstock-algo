@@ -4,6 +4,7 @@ from typing import Literal
 
 import pandas as pd
 
+from twstock.backtest.cost_model import TaiwanCostModel
 from twstock.backtest.result import BacktestResult
 from twstock.backtest.tearsheet import tear_sheet
 from twstock.broker.events import BrokerEvent, EventKind, EventLog
@@ -129,6 +130,56 @@ def _float_reliance_line(sim: SimResult) -> WaterfallLine:
     )
 
 
+def _unliquidated_residual_cost_line(sim: SimResult, cost_model: TaiwanCostModel) -> WaterfallLine:
+    """Hypothetical cost of liquidating whatever is still open at sim.end.
+
+    liquidate_at_end defaults to False, and even True cannot guarantee a
+    close -- a last-day halt/suspension still rejects the sell, and a thin
+    volume cap can leave a partial remainder. The frictionless Engine
+    reference has no such failure mode: its own final bar unconditionally
+    sells every open position (engine.py's is_last branch), so
+    reference.final_equity is always net of a real liquidation's costs.
+    Comparing sim.final_equity (gross mark-to-market on anything still
+    open) against that directly is gross-vs-net, not sim-vs-reference
+    friction. This line prices what a real exit would have cost -- via
+    cost_model.sell_costs at the last known price -- without the sim ever
+    submitting a sell order that could itself fail."""
+    if sim.positions_daily.empty:
+        return WaterfallLine(
+            name="unliquidated_residual_cost",
+            category="accepted_divergence",
+            value=Decimal(0),
+            expected_sign="nonnegative",
+            tolerance=Decimal("0.01"),
+            ok=True,
+        )
+    last_date = sim.positions_daily.index.get_level_values("date").max()
+    open_rows = sim.positions_daily.xs(last_date, level="date")
+
+    total_cost = Decimal(0)
+    for ticker, row in open_rows.iterrows():
+        shares = int(row["shares"])
+        if shares == 0:
+            continue
+        market_value = Decimal(str(row["market_value"]))
+        reference_price = float(market_value) / shares
+        fill_price, commission, tax = cost_model.sell_costs(ticker, shares, reference_price)
+        net_proceeds = (
+            Decimal(str(fill_price)) * shares - Decimal(str(commission)) - Decimal(str(tax))
+        )
+        total_cost += market_value - net_proceeds
+
+    value = total_cost / sim.initial_capital
+    return WaterfallLine(
+        name="unliquidated_residual_cost",
+        category="accepted_divergence",
+        value=value,
+        expected_sign="nonnegative",
+        tolerance=Decimal("0.01"),
+        ok=(value >= 0),
+    )
+
+
 def _slippage_line(sim: SimResult, reference: BacktestResult) -> WaterfallLine:
     sim_rate = sim.total_slippage_cost / Decimal(str(sim.trades["notional"].sum()))
     ref_rate = Decimal(str(reference.total_slippage_cost / reference.trades["notional"].sum()))
@@ -144,12 +195,16 @@ def _slippage_line(sim: SimResult, reference: BacktestResult) -> WaterfallLine:
 
 
 def _raw_vs_adjusted_line(
-    sim: SimResult, reference: BacktestResult, liquidity: WaterfallLine, float_line: WaterfallLine
+    sim: SimResult,
+    reference: BacktestResult,
+    liquidity: WaterfallLine,
+    float_line: WaterfallLine,
+    unliquidated: WaterfallLine,
 ) -> WaterfallLine:
     sim_return = sim.final_equity / sim.initial_capital - 1
     ref_return = Decimal(str(reference.final_equity / reference.initial_capital - 1))
     total_gap = sim_return - ref_return
-    value = total_gap - liquidity.value - float_line.value
+    value = total_gap - liquidity.value - float_line.value - unliquidated.value
     tolerance = Decimal("0.0005")
     return WaterfallLine(
         name="raw_vs_adjusted",
@@ -161,7 +216,9 @@ def _raw_vs_adjusted_line(
     )
 
 
-def generate_reconcile_report(sim: SimResult, reference: BacktestResult) -> ReconciliationReport:
+def generate_reconcile_report(
+    sim: SimResult, reference: BacktestResult, cost_model: TaiwanCostModel = TaiwanCostModel()
+) -> ReconciliationReport:
     events = list(EventLog(sim.event_log_path))
 
     headline = _headline_diff(sim, reference)
@@ -170,9 +227,12 @@ def generate_reconcile_report(sim: SimResult, reference: BacktestResult) -> Reco
     liquidity_line = _liquidity_underfill_line(sim, order_audit)
     float_line = _float_reliance_line(sim)
     slippage_line = _slippage_line(sim, reference)
-    raw_vs_adjusted_line = _raw_vs_adjusted_line(sim, reference, liquidity_line, float_line)
+    unliquidated_line = _unliquidated_residual_cost_line(sim, cost_model)
+    raw_vs_adjusted_line = _raw_vs_adjusted_line(
+        sim, reference, liquidity_line, float_line, unliquidated_line
+    )
 
-    waterfall = [slippage_line, raw_vs_adjusted_line, liquidity_line, float_line]
+    waterfall = [slippage_line, raw_vs_adjusted_line, liquidity_line, float_line, unliquidated_line]
 
     return ReconciliationReport(
         sim_strategy=sim.strategy_name,

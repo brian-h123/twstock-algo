@@ -4,8 +4,8 @@ Coverage so far (module is mid-build -- see PHASE_5.md step 14, ADR 0011):
   - _build_order_audit: schema, ticker population for both REJECT and
     PARTIAL_FILL (ADR 0011), null notional_gap for REJECT, empty-input schema
   - _headline_diff, _liquidity_underfill_line, _float_reliance_line,
-    _slippage_line, _raw_vs_adjusted_line: each in isolation, on hand-built
-    SimResult/BacktestResult fixtures
+    _unliquidated_residual_cost_line, _slippage_line, _raw_vs_adjusted_line:
+    each in isolation, on hand-built SimResult/BacktestResult fixtures
   - generate_reconcile_report: end-to-end wiring on a minimal real EventLog
 """
 
@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from twstock.backtest.cost_model import TaiwanCostModel
 from twstock.backtest.result import BacktestResult
 from twstock.broker.events import BrokerEvent, EventKind, EventLog, OrderId
 from twstock.broker.reconcile import (
@@ -26,6 +27,7 @@ from twstock.broker.reconcile import (
     _liquidity_underfill_line,
     _raw_vs_adjusted_line,
     _slippage_line,
+    _unliquidated_residual_cost_line,
     generate_reconcile_report,
 )
 from twstock.broker.rejection import RejectionReason
@@ -355,6 +357,82 @@ def test_float_reliance_line_flags_large_unsettled_average() -> None:
     assert line.ok is False
 
 
+# ─── _unliquidated_residual_cost_line ───────────────────────────────────────
+
+
+def _positions_daily(rows: list[tuple[date, str, int, float, float]]) -> pd.DataFrame:
+    """rows: (date, ticker, shares, avg_cost, market_value)."""
+    if not rows:
+        return _EMPTY_POSITIONS
+    df = pd.DataFrame(rows, columns=["date", "ticker", "shares", "avg_cost", "market_value"])
+    return df.set_index(["date", "ticker"])
+
+
+def test_unliquidated_residual_cost_line_zero_when_no_open_positions() -> None:
+    sim = _sim_result(positions_daily=_EMPTY_POSITIONS)
+
+    line = _unliquidated_residual_cost_line(sim, TaiwanCostModel())
+
+    assert line.value == Decimal(0)
+    assert line.category == "accepted_divergence"
+    assert line.ok is True
+
+
+def test_unliquidated_residual_cost_line_prices_a_hypothetical_sell() -> None:
+    """1,000 shares marked at 100.0 (market_value=100,000) held at sim.end.
+    sell_costs("2330", 1000, 100.0): fill_price=99.95, commission=
+    floor(99950*0.000855)=85, tax=floor(99950*0.003)=299 -> net proceeds
+    99,950-85-299=99,566. Cost = 100,000-99,566=434; value=434/1,000,000."""
+    sim = _sim_result(
+        initial_capital=Decimal("1000000"),
+        positions_daily=_positions_daily([(date(2026, 1, 7), "2330", 1000, 95.0, 100_000.0)]),
+    )
+
+    line = _unliquidated_residual_cost_line(sim, TaiwanCostModel())
+
+    assert line.value == Decimal("434") / Decimal("1000000")
+    assert line.expected_sign == "nonnegative"
+    assert line.ok is True
+
+
+def test_unliquidated_residual_cost_line_only_uses_the_last_date() -> None:
+    """A position held across multiple dates must be priced only at the
+    LAST date's mark -- earlier dates' rows must not double-count."""
+    sim = _sim_result(
+        initial_capital=Decimal("1000000"),
+        positions_daily=_positions_daily(
+            [
+                (date(2026, 1, 6), "2330", 1000, 95.0, 95_000.0),
+                (date(2026, 1, 7), "2330", 1000, 95.0, 100_000.0),
+            ]
+        ),
+    )
+
+    line = _unliquidated_residual_cost_line(sim, TaiwanCostModel())
+
+    assert line.value == Decimal("434") / Decimal("1000000")
+
+
+def test_unliquidated_residual_cost_line_sums_multiple_open_tickers() -> None:
+    sim = _sim_result(
+        initial_capital=Decimal("1000000"),
+        positions_daily=_positions_daily(
+            [
+                (date(2026, 1, 7), "2330", 1000, 95.0, 100_000.0),
+                (date(2026, 1, 7), "2317", 500, 45.0, 50_000.0),
+            ]
+        ),
+    )
+
+    line = _unliquidated_residual_cost_line(sim, TaiwanCostModel())
+
+    # 2330: cost 434 (see test above). 2317: fill_price=99.95*... wait, price is
+    # 50,000/500=100.0 too -> same per-share economics, half the shares:
+    # notional=99.95*500=49,975; commission=floor(49975*0.000855)=42;
+    # tax=floor(49975*0.003)=149; net=49,975-42-149=49,784; cost=50,000-49,784=216.
+    assert line.value == (Decimal("434") + Decimal("216")) / Decimal("1000000")
+
+
 # ─── _slippage_line ─────────────────────────────────────────────────────────
 
 
@@ -414,10 +492,18 @@ def test_raw_vs_adjusted_line_is_the_residual_after_measured_lines() -> None:
         tolerance=Decimal("0.01"),
         ok=True,
     )
+    unliquidated = WaterfallLine(
+        name="unliquidated_residual_cost",
+        category="accepted_divergence",
+        value=Decimal("0"),
+        expected_sign="nonnegative",
+        tolerance=Decimal("0.01"),
+        ok=True,
+    )
 
-    line = _raw_vs_adjusted_line(sim, reference, liquidity, float_line)
+    line = _raw_vs_adjusted_line(sim, reference, liquidity, float_line, unliquidated)
 
-    # total_gap = 0.10 - 0.05 = 0.05; residual = 0.05 - 0.02 - 0.01 = 0.02
+    # total_gap = 0.10 - 0.05 = 0.05; residual = 0.05 - 0.02 - 0.01 - 0 = 0.02
     assert float(line.value) == pytest.approx(0.02, abs=1e-9)
     assert line.category == "tripwire"
     assert line.ok is False  # 0.02 exceeds the 5bp (0.0005) band
@@ -442,10 +528,18 @@ def test_raw_vs_adjusted_line_ok_when_residual_within_band() -> None:
         tolerance=Decimal("0.01"),
         ok=True,
     )
+    unliquidated = WaterfallLine(
+        name="unliquidated_residual_cost",
+        category="accepted_divergence",
+        value=Decimal("0"),
+        expected_sign="nonnegative",
+        tolerance=Decimal("0.01"),
+        ok=True,
+    )
 
-    line = _raw_vs_adjusted_line(sim, reference, liquidity, float_line)
+    line = _raw_vs_adjusted_line(sim, reference, liquidity, float_line, unliquidated)
 
-    # total_gap = 0.08 - 0.05 = 0.03; residual = 0.03 - 0.02 - 0.01 = 0.00
+    # total_gap = 0.08 - 0.05 = 0.03; residual = 0.03 - 0.02 - 0.01 - 0 = 0.00
     assert float(line.value) == pytest.approx(0.0, abs=1e-9)
     assert line.ok is True
 
