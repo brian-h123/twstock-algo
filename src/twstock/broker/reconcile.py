@@ -22,6 +22,19 @@ _UNDERFILL_CAUSES = frozenset({"liquidity", RejectionReason.INSUFFICIENT_BUYING_
 
 @dataclass(frozen=True)
 class WaterfallLine:
+    """One named component of the reconciliation waterfall.
+
+    `category` controls whether this line gates `ReconciliationReport.passed`:
+    `"tripwire"` lines must be `ok` for the report to pass -- reserved for
+    checks expected to hold exactly regardless of strategy or window (e.g.
+    `slippage_diff`, a pure cost-model-consistency check). `"accepted_
+    divergence"` lines are still computed and still carry their own `ok`
+    flag (worth eyeballing for magnitude blowups), but a FAIL there does not
+    fail the report -- reserved for gaps that are expected, understood, and
+    not something reconciliation is trying to drive to zero (e.g.
+    `liquidity_underfill`, and per ADR 0014, `raw_vs_adjusted` itself).
+    """
+
     name: str
     category: Literal["tripwire", "accepted_divergence"]
     value: Decimal
@@ -32,6 +45,15 @@ class WaterfallLine:
 
 @dataclass(frozen=True)
 class ReconciliationReport:
+    """Result of reconciling a `SimResult` against a frictionless reference.
+
+    Attributes:
+        passed: True iff every `"tripwire"`-category line in `waterfall` is
+            `ok`. `"accepted_divergence"` lines (including `raw_vs_adjusted`,
+            ADR 0014) are excluded from this gate by design -- a FAIL there
+            does not fail the report; check the waterfall directly for those.
+    """
+
     sim_strategy: str
     reference_strategy: str
     headline: pd.DataFrame
@@ -217,6 +239,28 @@ def _raw_vs_adjusted_line(
     float_line: WaterfallLine,
     unliquidated: WaterfallLine,
 ) -> WaterfallLine:
+    """Residual return gap after subtracting the three measured lines.
+
+    ADR 0011 D1: an honest catch-all, not a causal isolation -- whatever
+    isn't liquidity, float, or unliquidated-position friction lands here.
+
+    ADR 0014: for a real, dividend-paying, multi-trade run (single-asset or
+    cross-sectional), this line is expected to be persistently nonzero and
+    is NOT expected to shrink toward the tight tolerance below. Reference
+    sizes positions (and, for cross-sectional strategies, rebalance
+    rotations) off the adjusted price series, which bakes in a dividend-
+    reinvestment assumption; the sim fills at raw prices and credits
+    dividends as discrete cash. Both are correct for what each engine
+    models -- this is a structural design-intent gap, not a bug to reconcile
+    toward zero, and fixing it is deferred to a future backtester migration
+    (ADR 0014). Accordingly this line is `category="accepted_divergence"`,
+    not `"tripwire"`: a FAIL here does not fail the report. The tolerance is
+    kept tight regardless (unlike a genuinely wide accepted-divergence band)
+    so its *magnitude* still functions as a bug smoke-test -- a swing far
+    outside the historically observed range is still worth investigating,
+    even though it won't gate `passed`. Contrast `slippage_diff`, a pure
+    cost-model-consistency check that should always land at exactly zero.
+    """
     sim_return = sim.final_equity / sim.initial_capital - 1
     ref_return = Decimal(str(reference.final_equity / reference.initial_capital - 1))
     total_gap = sim_return - ref_return
@@ -224,7 +268,7 @@ def _raw_vs_adjusted_line(
     tolerance = Decimal("0.0005")
     return WaterfallLine(
         name="raw_vs_adjusted",
-        category="tripwire",
+        category="accepted_divergence",
         value=value,
         expected_sign="zero",
         tolerance=tolerance,
@@ -235,6 +279,16 @@ def _raw_vs_adjusted_line(
 def generate_reconcile_report(
     sim: SimResult, reference: BacktestResult, cost_model: TaiwanCostModel = TaiwanCostModel()
 ) -> ReconciliationReport:
+    """Reconcile a pessimistic `SimResult` against a frictionless `Engine` reference.
+
+    `reference` is the "perfect world" hypothetical: near-zero friction,
+    used to isolate strategy signal quality (ADR 0008). `sim` is the "next
+    step toward reality" layer: fills, cash constraints, and corporate
+    actions modeled explicitly. Some divergence between the two is expected
+    and by design, not a defect to eliminate -- see each `WaterfallLine`'s
+    own docstring for what's measured and, for `raw_vs_adjusted` specifically,
+    why it's excluded from `passed` (ADR 0011, ADR 0014).
+    """
     events = list(EventLog(sim.event_log_path))
 
     headline = _headline_diff(sim, reference)

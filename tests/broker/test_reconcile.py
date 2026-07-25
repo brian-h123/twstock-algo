@@ -570,7 +570,10 @@ def test_raw_vs_adjusted_line_is_the_residual_after_measured_lines() -> None:
 
     # total_gap = 0.10 - 0.05 = 0.05; residual = 0.05 - 0.02 - 0.01 - 0 = 0.02
     assert float(line.value) == pytest.approx(0.02, abs=1e-9)
-    assert line.category == "tripwire"
+    # ADR 0014: accepted_divergence, not tripwire -- a FAIL here (checked via
+    # .ok, below) is expected for real dividend-paying/cross-sectional runs
+    # and must not gate report.passed.
+    assert line.category == "accepted_divergence"
     assert line.ok is False  # 0.02 exceeds the 5bp (0.0005) band
 
 
@@ -642,6 +645,24 @@ def test_generate_reconcile_report_fails_when_slippage_rate_diverges(tmp_path) -
     slippage_line = next(line for line in report.waterfall if line.name == "slippage_diff")
     assert slippage_line.ok is False
     assert report.passed is False
+
+
+def test_generate_reconcile_report_passes_despite_raw_vs_adjusted_failing(tmp_path) -> None:
+    """ADR 0014: raw_vs_adjusted is accepted_divergence, not tripwire -- a
+    real return gap between sim and reference (e.g. from the adjusted-vs-raw
+    price basis) must not fail the report on its own."""
+    log_path = tmp_path / "session.jsonl"
+    log_path.touch()
+
+    sim = _sim_result(event_log_path=log_path, final_equity=Decimal("1200000"))
+    reference = _backtest_result(final_equity=1_010_000.0)
+
+    report = generate_reconcile_report(sim, reference)
+
+    raw_vs_adjusted_line = next(line for line in report.waterfall if line.name == "raw_vs_adjusted")
+    assert raw_vs_adjusted_line.category == "accepted_divergence"
+    assert raw_vs_adjusted_line.ok is False
+    assert report.passed is True
 
 
 def test_generate_reconcile_report_order_audit_reflects_real_event_log(tmp_path) -> None:
