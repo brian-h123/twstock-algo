@@ -196,6 +196,7 @@ def test_partial_fill_is_never_silently_retried(monkeypatch) -> None:
         fill_model=VolumeParticipationFiller(participation_rate=0.05),
         settlement=NettingSettlement(),
         max_position_pct=1.0,
+        liquidate_at_end=True,
     )
     session.run()
 

@@ -174,6 +174,7 @@ def test_ex_day_price_limit_band_uses_adjusted_reference_not_raw_close(monkeypat
         fill_model=FullFill(),
         settlement=NettingSettlement(),
         max_position_pct=1.0,
+        liquidate_at_end=True,
     )
     session.run()  # must not raise
 

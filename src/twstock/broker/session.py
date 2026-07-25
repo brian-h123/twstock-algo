@@ -98,6 +98,7 @@ class PaperSession:
         suspension_calendar: SuspensionCalendar | None = None,
         price_limit_provider: PriceLimitProvider | None = None,
         session_id: str | None = None,
+        liquidate_at_end: bool = False,
     ) -> None:
         if isinstance(strategy, CrossSectionalStrategy):
             if allocator is None or schedule is None:
@@ -117,6 +118,7 @@ class PaperSession:
         self.max_position_pct = max_position_pct
         self.suspension_calendar = suspension_calendar
         self.price_limit_provider = price_limit_provider
+        self.liquidate_at_end = liquidate_at_end
         if session_id is None:
             PaperSession._next_session_seq += 1
             session_id = (
@@ -155,6 +157,7 @@ class PaperSession:
             max_position_pct=self.max_position_pct,
             suspension_calendar=self.suspension_calendar,
             price_limit_provider=self.price_limit_provider,
+            liquidate_at_end=self.liquidate_at_end,
         )
 
     def _next_id(self) -> OrderId:
@@ -345,7 +348,7 @@ class PaperSession:
         for i in range(len(batches) - 1):
             T, T_next = batches[i], batches[i + 1]
             is_last = i == len(batches) - 2
-            if is_last:
+            if is_last and self.liquidate_at_end:
                 self._force_liquidate(T.date)
             else:
                 decide(T, last_raw_close)

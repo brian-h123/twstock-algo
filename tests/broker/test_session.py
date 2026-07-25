@@ -160,13 +160,16 @@ def test_warm_up_caps_first_fill_by_prior_bar_volume(monkeypatch) -> None:
 
 
 def test_forced_liquidation_closes_position_by_final_bar(monkeypatch) -> None:
-    """BuyAndHold never emits its own exit signal — the position must still
-    be fully closed by the last bar via the forced-liquidation step."""
+    """BuyAndHold never emits its own exit signal, and liquidate_at_end=True
+    opts into the forced-liquidation step -- the position must be fully
+    closed by the last bar."""
     monkeypatch.setattr(
         "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
     )
     feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
-    session = PaperSession(**_default_kwargs(feed))
+    kwargs = _default_kwargs(feed)
+    kwargs["liquidate_at_end"] = True
+    session = PaperSession(**kwargs)
 
     session.run()
 
@@ -179,6 +182,30 @@ def test_forced_liquidation_closes_position_by_final_bar(monkeypatch) -> None:
         if e.kind in (EventKind.FILL, EventKind.PARTIAL_FILL) and e.payload.get("side") == "sell"
     ]
     assert len(sell_fills) == 1
+
+
+def test_default_does_not_force_liquidate_open_position(monkeypatch) -> None:
+    """liquidate_at_end defaults to False: Engine, the frictionless reference,
+    never force-liquidates either -- final_equity is pure mark-to-market on
+    both sides. BuyAndHold never exits on its own, so the position must
+    still be open at the end, with no closing sell emitted."""
+    monkeypatch.setattr(
+        "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
+    )
+    feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
+    session = PaperSession(**_default_kwargs(feed))
+
+    session.run()
+
+    assert session.account.positions[_TICKER].open_shares > 0
+
+    events = list(session.event_log)
+    sell_fills = [
+        e
+        for e in events
+        if e.kind in (EventKind.FILL, EventKind.PARTIAL_FILL) and e.payload.get("side") == "sell"
+    ]
+    assert sell_fills == []
 
 
 # ─── NettingSettlement close() at the final bar ─────────────────────────────
@@ -196,6 +223,7 @@ def test_netting_settlement_final_equity_reflects_the_closing_trade(monkeypatch)
     feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
     kwargs = _default_kwargs(feed)
     kwargs["settlement"] = NettingSettlement()
+    kwargs["liquidate_at_end"] = True
     session = PaperSession(**kwargs)
 
     result = session.run()
@@ -222,7 +250,9 @@ def test_trades_has_one_row_per_fill_with_expected_schema(monkeypatch) -> None:
         "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
     )
     feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
-    session = PaperSession(**_default_kwargs(feed))
+    kwargs = _default_kwargs(feed)
+    kwargs["liquidate_at_end"] = True
+    session = PaperSession(**kwargs)
 
     result = session.run()
 
@@ -251,7 +281,9 @@ def test_total_commission_and_tax_match_independent_recompute(monkeypatch) -> No
         "twstock.broker.session.get_adjusted_history", lambda ticker, start, end: _fake_bars()
     )
     feed = FixtureFeed(batches=[_batch(d) for d in _DATES])
-    session = PaperSession(**_default_kwargs(feed))
+    kwargs = _default_kwargs(feed)
+    kwargs["liquidate_at_end"] = True
+    session = PaperSession(**kwargs)
 
     result = session.run()
 

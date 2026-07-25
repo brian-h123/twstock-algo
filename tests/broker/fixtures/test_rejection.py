@@ -140,6 +140,7 @@ def test_sell_locked_at_floor_leaves_position_stuck_after_forced_liquidation(mon
         fill_model=FullFill(),
         settlement=NettingSettlement(),
         max_position_pct=1.0,
+        liquidate_at_end=True,
     )
     session.run()  # must not raise
 
