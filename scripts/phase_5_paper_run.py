@@ -11,6 +11,7 @@ Usage:
     uv run python scripts/phase_5_paper_run.py
     uv run python scripts/phase_5_paper_run.py --start 2024-01-01 --end 2024-12-31
     uv run python scripts/phase_5_paper_run.py --skip-momentum --skip-live
+    uv run python scripts/phase_5_paper_run.py --skip-single-asset --skip-momentum  # live smoke
 """
 
 import argparse
@@ -53,8 +54,14 @@ _XTAI = xcals.get_calendar("XTAI")
 
 
 def _n_sessions_before(end: date, n: int) -> date:
-    """The XTAI trading session `n` sessions strictly before `end`."""
-    sessions = _XTAI.sessions_window(pd.Timestamp(end), -n - 1)
+    """The XTAI trading session `n` sessions strictly before `end`.
+
+    `end` need not itself be a session (e.g. `date.today()` on a weekend) --
+    resolved to the nearest prior session first, since `sessions_window`
+    requires its anchor to already be one.
+    """
+    anchor = _XTAI.date_to_session(pd.Timestamp(end), direction="previous")
+    sessions = _XTAI.sessions_window(anchor, -n - 1)
     return sessions[0].date()
 
 
@@ -94,14 +101,19 @@ def run_single_asset_replay(start: date, end: date) -> tuple[SimResult, Backtest
     return sim_result, reference
 
 
-def print_reconciliation(sim_result: SimResult, reference: BacktestResult) -> None:
-    """Run generate_reconcile_report and print the headline diff + waterfall."""
+def print_reconciliation(sim_result: SimResult, reference: BacktestResult, label: str) -> None:
+    """Run generate_reconcile_report and print the headline diff + waterfall.
+
+    `label` distinguishes which leg this is in the printed output -- the
+    script calls this more than once (single-asset, cross-sectional), and
+    the section headers would otherwise be indistinguishable.
+    """
     report = generate_reconcile_report(sim=sim_result, reference=reference)
 
-    print("\n=== Reconciliation: headline diff (sim vs frictionless reference) ===")
+    print(f"\n=== Reconciliation ({label}): headline diff (sim vs frictionless reference) ===")
     print(report.headline.to_string())
 
-    print("\n=== Reconciliation: attribution waterfall ===")
+    print(f"\n=== Reconciliation ({label}): attribution waterfall ===")
     for line in report.waterfall:
         status = "OK" if line.ok else "FAIL"
         print(
@@ -112,23 +124,29 @@ def print_reconciliation(sim_result: SimResult, reference: BacktestResult) -> No
     print(f"\n  reconciliation passed (tripwires only): {report.passed}")
 
     if not report.order_audit.empty:
-        n_liquidity = (report.order_audit["cause"] == "liquidity").sum()
-        n_rejected = (report.order_audit["cause"] != "liquidity").sum()
+        # REJECT rows always have filled == 0; PARTIAL_FILL rows never do
+        # (ADR 0011 D2 follow-up: "liquidity" or "insufficient_buying_power").
+        underfilled = report.order_audit[report.order_audit["filled"] > 0]
+        rejected = report.order_audit[report.order_audit["filled"] == 0]
+        n_liquidity = (underfilled["cause"] == "liquidity").sum()
+        n_cash = (underfilled["cause"] == "insufficient_buying_power").sum()
         print(
             f"  order-level audit: {len(report.order_audit)} underfilled/rejected orders "
-            f"({n_liquidity} liquidity-capped, {n_rejected} rejected)"
+            f"({n_liquidity} liquidity-capped, {n_cash} cash-capped, {len(rejected)} rejected)"
         )
     else:
         print("  order-level audit: no underfilled or rejected orders")
 
 
 def run_cross_sectional_momentum_both_modes(start: date, end: date) -> None:
-    """CrossSectionalMomentum over the Top 50, netting vs settled-cash-only.
+    """CrossSectionalMomentum over the Top 50, netting vs settled-cash-only,
+    netting reconciled against the frictionless Engine reference.
 
     Both settlement modes run under identical friction otherwise; comparing
     their unsettled-cash curves quantifies float reliance (ADR 0009 D5) --
     the float line is expected near zero under NettingSettlement and
-    material under SettledCashOnly.
+    material under SettledCashOnly. NettingSettlement is the canonical
+    Phase 5 preset (CLAUDE.md), so it's the leg reconciled against Engine.
     """
     print(f"\n=== Cross-sectional momentum: Top 50, {start} -> {end} ===")
     universe = get_top50_universe()
@@ -160,6 +178,21 @@ def run_cross_sectional_momentum_both_modes(start: date, end: date) -> None:
         f"  settled-cash-only avg unsettled cash: "
         f"{settled_result.unsettled_cash_curve.mean():,.0f} (quantifies float reliance)"
     )
+
+    reference = Engine(
+        capital=BACKTEST_CAPITAL_NTD,
+        cost_model=TaiwanCostModel(),
+        max_position_pct=MAX_POSITION_PCT,
+    ).run(
+        strategy=CrossSectionalMomentum(lookback=MOMENTUM_LOOKBACK, skip=MOMENTUM_SKIP),
+        tickers=universe,
+        start=start,
+        end=end,
+        allocator=EqualWeightTopN(n=MOMENTUM_TOP_N),
+        schedule=Monthly(),
+    )
+    print(f"  reference (frictionless) final equity: {reference.final_equity:,.0f}")
+    print_reconciliation(netting_result, reference, label="cross-sectional momentum, netting")
 
 
 def run_live_smoke_test(sessions: int) -> None:
@@ -200,6 +233,11 @@ def main() -> None:
     parser.add_argument("--start", default=str(DEFAULT_START), help="Replay start date YYYY-MM-DD")
     parser.add_argument("--end", default=str(DEFAULT_END), help="Replay end date YYYY-MM-DD")
     parser.add_argument(
+        "--skip-single-asset",
+        action="store_true",
+        help="Skip the single-asset SMA replay section",
+    )
+    parser.add_argument(
         "--skip-momentum",
         action="store_true",
         help="Skip the cross-sectional momentum section (slow: 50 tickers x both modes)",
@@ -220,8 +258,11 @@ def main() -> None:
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end)
 
-    sim_result, reference = run_single_asset_replay(start, end)
-    print_reconciliation(sim_result, reference)
+    if not args.skip_single_asset:
+        sim_result, reference = run_single_asset_replay(start, end)
+        print_reconciliation(sim_result, reference, label="single-asset SMA")
+    else:
+        print("\n=== Single-asset SMA replay: skipped (--skip-single-asset) ===")
 
     if not args.skip_momentum:
         run_cross_sectional_momentum_both_modes(start, end)
