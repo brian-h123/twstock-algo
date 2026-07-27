@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 
@@ -80,7 +81,7 @@ class TaiwanCostModel:
         No tax on buys."""
         fill_price = self.apply_slippage(reference_price, "buy")
         notional = fill_price * shares
-        commission = max(notional * self.commission_pct, self.commission_min_twd)
+        commission = max(math.floor(notional * self.commission_pct), self.commission_min_twd)
         return fill_price, commission
 
     def sell_costs(
@@ -91,7 +92,7 @@ class TaiwanCostModel:
         Commission = max(notional × commission_pct, commission_min_twd)."""
         fill_price = self.apply_slippage(reference_price, "sell")
         notional = fill_price * shares
-        commission = max(notional * self.commission_pct, self.commission_min_twd)
+        commission = max(math.floor(notional * self.commission_pct), self.commission_min_twd)
         tax_rate = self.etf_sell_tax if ticker in self.etf_tickers else self.stock_sell_tax
-        tax = notional * tax_rate
+        tax = math.floor(notional * tax_rate)
         return fill_price, commission, tax

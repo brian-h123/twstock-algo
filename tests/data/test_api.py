@@ -115,6 +115,43 @@ def test_adjustment_applied():
     assert result.loc[pd.Timestamp("2023-01-02"), "close"] == pytest.approx(expected)
 
 
+def test_future_action_does_not_leak_into_a_bounded_window():
+    """Regression: an action recorded AFTER `end` (e.g. a dividend declared
+    the following year) must not back-adjust bars inside [start, end] --
+    adjust()'s "every row strictly before ex_date" rule would otherwise
+    apply a not-yet-known future action to the entire window, since every
+    row in a bounded window is chronologically before a later action's
+    ex_date. Uses a filtering fake (not a static mock) for
+    read_corporate_actions so the assertion actually exercises whether
+    start/end are wired through, not just that a fixed return_value round-trips."""
+    raw = _ohlcv(["2023-01-02", "2023-01-03"], [80.0, 100.0])
+    all_actions = pd.concat(
+        [_cash_div("2023-01-03", cash_amount=5.0), _cash_div("2024-06-01", cash_amount=9.0)],
+        ignore_index=True,
+    )
+
+    def fake_read_ca(ticker, start=None, end=None):
+        df = all_actions
+        if start is not None:
+            df = df[df["ex_date"] >= pd.Timestamp(start)]
+        if end is not None:
+            df = df[df["ex_date"] <= pd.Timestamp(end)]
+        return df.reset_index(drop=True)
+
+    with (
+        patch("twstock.data.api.read_ohlcv", return_value=raw),
+        patch("twstock.data.api.read_corporate_actions", side_effect=fake_read_ca),
+    ):
+        result = get_adjusted_history("2330", "2023-01-02", "2023-01-03")
+
+    # Only the in-window 2023-01-03 dividend applies: ref_close (the close ON
+    # the ex-date) = 100.0; factor = ref_close / (ref_close + cash_amount)
+    # = 100/105. The 2024-06-01 dividend (after `end`) must be excluded,
+    # not folded in on top of this.
+    expected = 80.0 * (100.0 / 105.0)
+    assert result.loc[pd.Timestamp("2023-01-02"), "close"] == pytest.approx(expected)
+
+
 def test_empty_data_returns_empty_dataframe():
     empty = pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
     with (

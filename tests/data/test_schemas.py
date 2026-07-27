@@ -1,7 +1,12 @@
 import pandas as pd
 import pytest
 
-from twstock.data.schemas import CORPORATE_ACTIONS_SCHEMA, OHLCV_SCHEMA, validate
+from twstock.data.schemas import (
+    CORPORATE_ACTIONS_SCHEMA,
+    OHLCV_SCHEMA,
+    SUSPENSIONS_SCHEMA,
+    validate,
+)
 
 
 def _valid_ohlcv_row() -> dict:
@@ -113,6 +118,7 @@ def test_corporate_actions_valid_df_passes():
                 "stock_split",
             ],
             "cash_amount": [3.0, None, 1.5, None, None, None],
+            "pay_date": pd.to_datetime(["2023-08-10", "NaT", "2022-08-15", "NaT", "NaT", "NaT"]),
             "ratio": [None, 0.05, 0.02, 0.18, 1.225, 0.25],
             "subscription_price": [None, None, None, 17.0, None, None],
         }
@@ -133,6 +139,7 @@ def test_corporate_actions_rejects_invalid_action_type():
             "ticker": ["2330"],
             "action_type": ["buyback"],  # not in the allowed set
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [float("nan")],
             "subscription_price": [float("nan")],
         }
@@ -148,6 +155,7 @@ def test_corporate_actions_rejects_split_as_invalid_type():
             "ticker": ["2330"],
             "action_type": ["split"],  # renamed to capital_reduction; split is no longer valid
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [2.0],
             "subscription_price": [float("nan")],
         }
@@ -163,6 +171,7 @@ def test_corporate_actions_rejects_bad_ticker():
             "ticker": ["50"],  # too short, fails ^\d{4}$
             "action_type": ["cash_dividend"],
             "cash_amount": [3.0],
+            "pay_date": pd.to_datetime(["2023-08-10"]),
             "ratio": [float("nan")],
             "subscription_price": [float("nan")],
         }
@@ -183,6 +192,23 @@ def test_cash_dividend_requires_cash_amount():
             "ticker": ["2330"],
             "action_type": ["cash_dividend"],
             "cash_amount": [float("nan")],  # violation
+            "pay_date": pd.to_datetime(["2023-08-10"]),
+            "ratio": [float("nan")],
+            "subscription_price": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_cash_dividend_requires_pay_date():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2023-07-18"]),
+            "ticker": ["2330"],
+            "action_type": ["cash_dividend"],
+            "cash_amount": [3.0],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),  # violation
             "ratio": [float("nan")],
             "subscription_price": [float("nan")],
         }
@@ -198,6 +224,23 @@ def test_cash_and_stock_dividend_requires_cash_amount():
             "ticker": ["1101"],
             "action_type": ["cash_and_stock_dividend"],
             "cash_amount": [float("nan")],  # violation
+            "pay_date": pd.to_datetime(["2022-08-15"]),
+            "ratio": [0.02],
+            "subscription_price": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, CORPORATE_ACTIONS_SCHEMA)
+
+
+def test_cash_and_stock_dividend_requires_pay_date():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2022-07-21"]),
+            "ticker": ["1101"],
+            "action_type": ["cash_and_stock_dividend"],
+            "cash_amount": [1.5],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),  # violation
             "ratio": [0.02],
             "subscription_price": [float("nan")],
         }
@@ -213,6 +256,7 @@ def test_cash_and_stock_dividend_requires_ratio():
             "ticker": ["1101"],
             "action_type": ["cash_and_stock_dividend"],
             "cash_amount": [1.5],
+            "pay_date": pd.to_datetime(["2022-08-15"]),
             "ratio": [float("nan")],  # violation
             "subscription_price": [float("nan")],
         }
@@ -228,6 +272,7 @@ def test_stock_dividend_requires_ratio():
             "ticker": ["2330"],
             "action_type": ["stock_dividend"],
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [float("nan")],  # violation
             "subscription_price": [float("nan")],
         }
@@ -243,6 +288,7 @@ def test_rights_issue_requires_ratio():
             "ticker": ["3312"],
             "action_type": ["rights_issue"],
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [float("nan")],  # violation
             "subscription_price": [17.0],
         }
@@ -258,6 +304,7 @@ def test_rights_issue_requires_subscription_price():
             "ticker": ["3312"],
             "action_type": ["rights_issue"],
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [0.18],
             "subscription_price": [float("nan")],  # violation
         }
@@ -273,6 +320,7 @@ def test_capital_reduction_requires_ratio():
             "ticker": ["2330"],
             "action_type": ["capital_reduction"],
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [float("nan")],  # violation
             "subscription_price": [float("nan")],
         }
@@ -288,6 +336,7 @@ def test_stock_split_valid_row_passes():
             "ticker": ["0050"],
             "action_type": ["stock_split"],
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [0.25],
             "subscription_price": [float("nan")],
         }
@@ -303,6 +352,7 @@ def test_stock_split_requires_ratio():
             "ticker": ["0050"],
             "action_type": ["stock_split"],
             "cash_amount": [float("nan")],
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [float("nan")],  # violation
             "subscription_price": [float("nan")],
         }
@@ -318,6 +368,7 @@ def test_cash_dividend_null_ratio_is_ok():
             "ticker": ["2330"],
             "action_type": ["cash_dividend"],
             "cash_amount": [3.0],
+            "pay_date": pd.to_datetime(["2023-08-10"]),
             "ratio": [float("nan")],  # ratio not required for cash_dividend
             "subscription_price": [float("nan")],
         }
@@ -333,6 +384,7 @@ def test_rights_issue_null_cash_amount_is_ok():
             "ticker": ["3312"],
             "action_type": ["rights_issue"],
             "cash_amount": [float("nan")],  # not required for rights_issue
+            "pay_date": pd.Series([pd.NaT], dtype="datetime64[ns]"),
             "ratio": [0.18],
             "subscription_price": [17.0],
         }
@@ -341,9 +393,115 @@ def test_rights_issue_null_cash_amount_is_ok():
     assert len(result) == 1
 
 
+def test_non_cash_rows_allow_null_pay_date():
+    df = pd.DataFrame(
+        {
+            "ex_date": pd.to_datetime(["2022-09-20", "2021-06-15", "2020-08-10", "2025-06-18"]),
+            "ticker": ["2330", "3312", "2330", "0050"],
+            "action_type": ["stock_dividend", "rights_issue", "capital_reduction", "stock_split"],
+            "cash_amount": [float("nan"), float("nan"), float("nan"), float("nan")],
+            "pay_date": pd.Series([pd.NaT, pd.NaT, pd.NaT, pd.NaT], dtype="datetime64[ns]"),
+            "ratio": [0.05, 0.18, 1.225, 0.25],
+            "subscription_price": [float("nan"), 17.0, float("nan"), float("nan")],
+        }
+    )
+    result = validate(df, CORPORATE_ACTIONS_SCHEMA)
+    assert len(result) == 4
+
+
 # ---------------------------------------------------------------------------
 # validate() helper
 # ---------------------------------------------------------------------------
+
+
+def _valid_suspensions_row() -> dict:
+    return {
+        "ticker": ["2317"],
+        "halt_date": pd.to_datetime(["2025-07-30"]),
+        "resume_date": pd.to_datetime(["2025-07-31"]),
+        "source": ["TWTAWU"],
+        "fetched_at": pd.to_datetime(["2026-07-22"]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SUSPENSIONS_SCHEMA — happy path
+# ---------------------------------------------------------------------------
+
+
+def test_suspensions_valid_df_passes():
+    df = pd.DataFrame(_valid_suspensions_row())
+    result = validate(df, SUSPENSIONS_SCHEMA)
+    assert len(result) == 1
+
+
+def test_suspensions_fetched_at_is_optional():
+    df = pd.DataFrame(_valid_suspensions_row() | {"fetched_at": pd.Series([pd.NaT])})
+    result = validate(df, SUSPENSIONS_SCHEMA)
+    assert len(result) == 1
+
+
+def test_suspensions_fetched_at_column_can_be_omitted():
+    df = pd.DataFrame(_valid_suspensions_row()).drop(columns=["fetched_at"])
+    result = validate(df, SUSPENSIONS_SCHEMA)
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# SUSPENSIONS_SCHEMA — column checks
+# ---------------------------------------------------------------------------
+
+
+def test_suspensions_rejects_bad_ticker():
+    df = pd.DataFrame(_valid_suspensions_row() | {"ticker": ["50"]})  # too short, fails ^\d{4}$
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_null_halt_date():
+    df = pd.DataFrame(
+        _valid_suspensions_row() | {"halt_date": pd.Series([pd.NaT], dtype="datetime64[ns]")}
+    )
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_null_resume_date():
+    df = pd.DataFrame(
+        _valid_suspensions_row() | {"resume_date": pd.Series([pd.NaT], dtype="datetime64[ns]")}
+    )
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_null_source():
+    df = pd.DataFrame(_valid_suspensions_row() | {"source": [None]})
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# SUSPENSIONS_SCHEMA — resume_date > halt_date check
+# ---------------------------------------------------------------------------
+
+
+def test_suspensions_rejects_resume_before_halt():
+    df = pd.DataFrame(
+        _valid_suspensions_row()
+        | {
+            "halt_date": pd.to_datetime(["2025-07-31"]),
+            "resume_date": pd.to_datetime(["2025-07-30"]),
+        }
+    )
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
+
+
+def test_suspensions_rejects_resume_equal_halt():
+    same_day = pd.to_datetime(["2025-07-30"])
+    df = pd.DataFrame(_valid_suspensions_row() | {"halt_date": same_day, "resume_date": same_day})
+    with pytest.raises(ValueError):
+        validate(df, SUSPENSIONS_SCHEMA)
 
 
 def test_validate_returns_dataframe():

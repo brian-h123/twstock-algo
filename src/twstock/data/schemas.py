@@ -42,6 +42,7 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
             ),
         ),
         "cash_amount": Column(pa.Float64, Check.ge(0), nullable=True),
+        "pay_date": Column(pa.DateTime, nullable=True),
         "ratio": Column(pa.Float64, Check.greater_than(0), nullable=True),
         "subscription_price": Column(pa.Float64, Check.greater_than(0), nullable=True),
     },
@@ -78,10 +79,35 @@ CORPORATE_ACTIONS_SCHEMA = pa.DataFrameSchema(
         ),
         Check(
             lambda df: (
+                df.loc[
+                    df["action_type"].isin(["cash_dividend", "cash_and_stock_dividend"]), "pay_date"
+                ]
+                .notna()
+                .all()
+            ),
+            error="pay_date required for cash_dividend and cash_and_stock_dividend",
+        ),
+        Check(
+            lambda df: (
                 df.loc[df["action_type"] == "rights_issue", "subscription_price"].notna().all()
             ),
             error="subscription_price required when action_type == rights_issue",
         ),
+    ],
+)
+
+SUSPENSIONS_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "ticker": Column(pa.String, Check.str_matches(r"^\d{4}$")),
+        "halt_date": Column(pa.DateTime, nullable=False),
+        "resume_date": Column(pa.DateTime, nullable=False),
+        "source": Column(pa.String, nullable=False),  # "TWTAWU"
+        "fetched_at": Column(pa.DateTime, required=False, nullable=True),
+    },
+    checks=[
+        Check(
+            lambda df: (df["resume_date"] > df["halt_date"]).all(), error="resume_date <= halt_date"
+        )
     ],
 )
 

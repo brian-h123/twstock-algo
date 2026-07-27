@@ -1,11 +1,14 @@
-"""Unit tests for twstock.backtest.reconciler.reconcile.
+"""Unit tests for twstock.backtest.reconciler.reconcile and budget_weights.
 
 Tests use a minimal mock for Portfolio so they focus solely on the reconciler's
 diffing logic without Portfolio machinery (cost model, trade recording, etc.).
 All tests run without network calls or disk I/O.
 
-Coverage:
+reconcile() coverage:
   - All sell orders precede all buy orders in the returned list
+  - Sells and buys are each sorted by ticker within their group -- the
+    all_tickers set() used to leak Python's per-process string hash order
+    into submission order (ADR 0013)
   - Share sizing: floor(equity × weight / price), not round
   - Ticker held but not targeted → full-position sell
   - Ticker targeted but not held → full buy
@@ -13,14 +16,26 @@ Coverage:
   - Ticker absent from prices → silently skipped (stale/halted)
   - Rotation regression: buy sized on full equity, not near-zero cash
     (guards the silent-under-investment bug when a same-bar sell funds a buy)
+
+budget_weights() coverage:
+  - No scaling when buy demand fits the cost-budgeted cash on hand
+  - Proportional scaling (same ratio) across multiple buys when demand exceeds it
+  - Same-bar sell proceeds are credited before scaling buys (the rotation case)
+  - A buy scaled below 1 share + the commission floor is dropped to zero
+    and recorded as a CashShortfall
+  - shortfalls are sorted by ticker, same set()-order fix as reconcile() (ADR 0013)
+  - equity <= 0 / no buys at all → early return, unchanged weights, no shortfalls
+  - Ticker missing from prices is excluded from the cash math entirely
 """
 
 import math
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
-from twstock.backtest.reconciler import Order, reconcile
+from twstock.backtest.cost_model import TaiwanCostModel
+from twstock.backtest.reconciler import Order, budget_weights, reconcile
 
 
 def _portfolio(equity: float, positions: dict[str, int]) -> MagicMock:
@@ -53,6 +68,25 @@ def test_all_sells_precede_all_buys() -> None:
     assert sell_indices, "expected at least one sell order"
     assert buy_indices, "expected at least one buy order"
     assert max(sell_indices) < min(buy_indices), "all sells must precede all buys"
+
+
+def test_orders_are_sorted_by_ticker_within_each_side() -> None:
+    """Sells and buys must each be ticker-sorted, not just sells-before-buys
+    as a group (ADR 0013). Before the fix, all_tickers was a set(), whose
+    iteration order depends on Python's per-process string hash
+    randomization -- ticker pairs chosen here in reverse of alphabetical
+    order would previously have come out in either order depending on the
+    process's hash seed, silently reordering same-bar cash contention."""
+    portfolio = _portfolio(equity=100_000, positions={"Z": 100, "M": 50})
+    target_weights = pd.Series({"B": 0.10, "A": 0.10})  # exit Z+M, enter A+B
+    prices = {"Z": 100.0, "M": 100.0, "A": 100.0, "B": 100.0}
+
+    orders = reconcile(target_weights, portfolio, prices)
+
+    sells = [o.ticker for o in orders if o.side == "sell"]
+    buys = [o.ticker for o in orders if o.side == "buy"]
+    assert sells == sorted(sells) == ["M", "Z"]
+    assert buys == sorted(buys) == ["A", "B"]
 
 
 # ─── Share sizing ─────────────────────────────────────────────────────────────
@@ -173,3 +207,187 @@ def test_rotation_buy_sized_on_equity_not_cash() -> None:
     sell_pos = next(i for i, o in enumerate(orders) if o.side == "sell")
     buy_pos = next(i for i, o in enumerate(orders) if o.side == "buy")
     assert sell_pos < buy_pos
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# budget_weights
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── No scaling needed ────────────────────────────────────────────────────────
+
+
+def test_budget_weights_no_scaling_when_demand_fits_budget() -> None:
+    """Ample cash relative to demand: weights pass through, no shortfalls."""
+    target_weights = pd.Series({"A": 0.20})
+    current_weights = pd.Series(dtype=float)
+    prices = {"A": 100.0}
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=100_000,
+        gross_buying_power=100_000,
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    assert adjusted["A"] == pytest.approx(0.20)
+    assert shortfalls == []
+
+
+# ─── Proportional scaling ─────────────────────────────────────────────────────
+
+
+def test_budget_weights_scales_multiple_buys_by_same_ratio() -> None:
+    """When demand exceeds budget, every buy is scaled by the same factor —
+    order-independent, never first-come-first-served."""
+    target_weights = pd.Series({"A": 0.20, "B": 0.15})  # demand: 200k + 150k = 350k
+    current_weights = pd.Series(dtype=float)
+    prices = {"A": 100.0, "B": 100.0}
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=1_000_000,
+        gross_buying_power=200_000,
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    ratio_a = adjusted["A"] / target_weights["A"]
+    ratio_b = adjusted["B"] / target_weights["B"]
+    assert ratio_a == pytest.approx(ratio_b, rel=1e-9)
+    assert ratio_a < 1.0
+    assert {s.ticker for s in shortfalls} == {"A", "B"}
+
+
+# ─── Same-bar sell crediting (the rotation case) ──────────────────────────────
+
+
+def test_budget_weights_credits_same_bar_sell_proceeds() -> None:
+    """Selling out of A to fund buying B is fully funded by A's own proceeds,
+    even with almost no cash already on hand — the full-rotation cash-bug
+    regression this whole mechanism exists to fix."""
+    current_weights = pd.Series({"A": 0.20})  # hold 200k of A
+    target_weights = pd.Series({"B": 0.20})  # exit A entirely, enter B at 200k
+    prices = {"A": 100.0, "B": 100.0}
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=1_000_000,
+        gross_buying_power=5_000,
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    assert shortfalls == []
+    assert adjusted["B"] == pytest.approx(0.20)
+
+
+# ─── Sub-floor buys are dropped, not merely shrunk ────────────────────────────
+
+
+def test_budget_weights_drops_buy_below_min_viable_notional() -> None:
+    """A buy scaled down below (1 share + the commission floor) is zeroed and
+    flagged, distinct from a buy that's merely scaled down but still viable."""
+    target_weights = pd.Series({"A": 0.001, "B": 0.50})  # A wants 1k, B wants 500k
+    current_weights = pd.Series(dtype=float)
+    prices = {"A": 500.0, "B": 100.0}
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=1_000_000,
+        gross_buying_power=1_000,
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    by_ticker = {s.ticker: s for s in shortfalls}
+    assert by_ticker["A"].allocated_notional == 0.0
+    assert by_ticker["A"].target_notional == pytest.approx(1_000.0)
+    assert adjusted["A"] == pytest.approx(0.0)
+
+    assert 0.0 < by_ticker["B"].allocated_notional < by_ticker["B"].target_notional
+
+
+def test_shortfalls_are_sorted_by_ticker() -> None:
+    """shortfalls order must be deterministic (ticker-sorted), not dependent
+    on set() iteration order (ADR 0013)."""
+    target_weights = pd.Series({"Z": 0.20, "M": 0.20, "A": 0.20})
+    current_weights = pd.Series(dtype=float)
+    prices = {"Z": 100.0, "M": 100.0, "A": 100.0}
+
+    _, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=1_000_000,
+        gross_buying_power=1,  # forces every buy below the min-viable floor
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    tickers = [s.ticker for s in shortfalls]
+    assert tickers == sorted(tickers) == ["A", "M", "Z"]
+
+
+# ─── Early-return guards ───────────────────────────────────────────────────────
+
+
+def test_budget_weights_zero_equity_returns_unchanged() -> None:
+    target_weights = pd.Series({"A": 0.20})
+    current_weights = pd.Series(dtype=float)
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=0.0,
+        gross_buying_power=100_000,
+        prices={"A": 100.0},
+        cost_model=TaiwanCostModel(),
+    )
+
+    assert adjusted is target_weights
+    assert shortfalls == []
+
+
+def test_budget_weights_no_buys_returns_unchanged() -> None:
+    """A rebalance that's all sells (or no change) has nothing to budget."""
+    target_weights = pd.Series(dtype=float)
+    current_weights = pd.Series({"A": 0.30})
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=100_000,
+        gross_buying_power=0,
+        prices={"A": 100.0},
+        cost_model=TaiwanCostModel(),
+    )
+
+    assert adjusted is target_weights
+    assert shortfalls == []
+
+
+# ─── Missing price → excluded from cash math ──────────────────────────────────
+
+
+def test_budget_weights_ticker_missing_from_prices_excluded() -> None:
+    """A ticker absent from prices never enters the buy-side budgeting math,
+    mirroring reconcile()'s own treatment of stale/halted tickers."""
+    target_weights = pd.Series({"A": 0.20, "B": 0.20})
+    current_weights = pd.Series(dtype=float)
+    prices = {"A": 100.0}  # B missing
+
+    adjusted, shortfalls = budget_weights(
+        target_weights,
+        current_weights,
+        equity=100_000,
+        gross_buying_power=100_000,
+        prices=prices,
+        cost_model=TaiwanCostModel(),
+    )
+
+    assert "B" not in {s.ticker for s in shortfalls}
+    assert adjusted["B"] == pytest.approx(target_weights["B"])

@@ -1,0 +1,57 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      User-Agent:
+      - twstock-algo/0.1
+    method: GET
+    uri: https://www.twse.com.tw/rwd/zh/afterTrading/TWTAWU?endDate=20260516&querytype=3&response=json&startDate=20260510
+  response:
+    body:
+      string: "{\"stat\":\"OK\",\"title\":\"\u66AB\u505C\u4EA4\u6613\u8B49\u5238 \u67E5\u8A62\u7BC4\u570D\uFF1A\u5168\u90E8\u4E0A\u5E02\u8B49\u5238
+        \u671F\u9593\uFF1A115/05/10 \u5230 115/05/16\",\"fields\":[\"\u7DE8\u865F\",\"\u8B49\u5238\u4EE3\u865F\",\"\u8B49\u5238\u540D\u7A31\",\"\u66AB\u505C\u4EA4\u6613\u65E5\u671F\",\"\u66AB\u505C\u4EA4\u6613\u6642\u9593\",\"\u6062\u5FA9\u4EA4\u6613\u65E5\u671F\",\"\u6062\u5FA9\u4EA4\u6613\u6642\u9593\"],\"data\":[[1,\"033641\",\"\u6B63\u5D34\u7D71\u4E0058\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[2,\"033642\",\"\u6B63\u5D34\u7D71\u4E005C\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[3,\"040421\",\"\u6B63\u5D34\u570B\u796855\u8CFC01\",\"115/05/13\",\"8:00\",\"\",\"\"],[4,\"040613\",\"\u6B63\u5D34\u7D71\u4E006A\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[5,\"045495\",\"\u6B63\u5D34\u570B\u796856\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[6,\"047768\",\"\u6B63\u5D34\u5143\u5BCC56\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[7,\"053051\",\"\u6B63\u5D34\u51F1\u57FA57\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[8,\"053626\",\"\u6B63\u5D34\u6C38\u8C5057\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[9,\"054629\",\"\u6B63\u5D34\u5143\u5BCC57\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[10,\"059401\",\"\u6B63\u5D34\u7D71\u4E0055\u8CFC02\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[11,\"059407\",\"\u6C38\u5D34\u63A7\u7D71\u4E0055\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[12,\"060293\",\"\u6B63\u5D34\u570B\u79685A\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[13,\"060593\",\"\u6B63\u5D34\u51F1\u57FA5A\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[14,\"061980\",\"\u6B63\u5D34\u5143\u5BCC59\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[15,\"062352\",\"\u6B63\u5D34\u6C38\u8C505C\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[16,\"062475\",\"\u6B63\u5D34\u5143\u59275A\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[17,\"074435\",\"\u6C38\u5D34\u63A7\u7D71\u4E0056\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[18,\"081121\",\"\u6C38\u5D34\u63A7\u7D71\u4E0057\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[19,\"083183\",\"\u6B63\u5D34\u7D71\u4E0056\u8CFC01\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[20,\"083334\",\"\u6B63\u5D34\u7D71\u4E0056\u8CFC02\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[21,\"2392\",\"\u6B63\u5D34\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[22,\"3712\",\"\u6C38\u5D34\u6295\u63A7\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"],[23,\"6806\",\"\u68EE\u5D34\u80FD\u6E90\",\"115/05/13\",\"8:00\",\"115/05/14\",\"8:00\"]],\"params\":{\"startDate\":\"20260510\",\"endDate\":\"20260516\",\"stockNo\":\"\",\"selectType\":\"\",\"querytype\":\"3\",\"response\":\"json\",\"controller\":\"afterTrading\",\"action\":\"TWTAWU\",\"lang\":\"zh\"}}"
+    headers:
+      Access-Control-Allow-Origin:
+      - '*'
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Security-Policy:
+      - frame-ancestors 'self' *.twse.com.tw *.tdcc.com.tw http://digitalprocesssyst-epassbook.cdn.hinet.net
+        digitalprocesssys-epassbook.cdn.hinet.net;
+      Content-Type:
+      - application/json;charset=UTF-8
+      Date:
+      - Wed, 22 Jul 2026 07:34:09 GMT
+      Permissions-Policy:
+      - camera=(),microphone=(),geolocation=(),sync-xhr=*,gyroscope=()
+      Referrer-Policy:
+      - strict-origin-when-cross-origin
+      Server:
+      - HiNetCDN
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Accept-Encoding
+      - accept-encoding
+      X-Application-Context:
+      - application:production
+      X-Cache:
+      - HIT
+      X-Content-Type-Options:
+      - nosniff
+      x-request-id:
+      - fe4d850512cd643b428363e96b629721
+    status:
+      code: 200
+      message: ''
+version: 1

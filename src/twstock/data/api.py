@@ -11,7 +11,10 @@ from twstock.universe import get_top50_universe
 @functools.lru_cache(maxsize=128)
 def _cached_adjusted_history(ticker: str, start: date, end: date) -> pd.DataFrame:
     raw_ohlcv = read_ohlcv(ticker, start, end)
-    corporate_actions = read_corporate_actions(ticker)
+    # Bounded to [start, end]: an action recorded after `end` must not back-adjust
+    # bars inside the window -- adjust()'s "every row strictly before ex_date" rule
+    # would otherwise apply a not-yet-known future action to the entire window.
+    corporate_actions = read_corporate_actions(ticker, start, end)
 
     adjusted = adjust(raw_ohlcv, corporate_actions)
     return adjusted.set_index("date")

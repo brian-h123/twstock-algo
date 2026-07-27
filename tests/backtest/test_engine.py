@@ -338,8 +338,8 @@ def test_etf_ticker_uses_0_1_pct_sell_tax(cost_model: TaiwanCostModel) -> None:
         )
 
     sell = result.trades[result.trades["side"] == "sell"].iloc[0]
-    expected_tax = sell["notional"] * cost_model.etf_sell_tax
-    assert abs(sell["tax"] - expected_tax) < 0.01
+    expected_tax = math.floor(sell["notional"] * cost_model.etf_sell_tax)
+    assert sell["tax"] == expected_tax
 
 
 def test_stock_ticker_uses_0_3_pct_sell_tax(cost_model: TaiwanCostModel) -> None:
@@ -356,8 +356,8 @@ def test_stock_ticker_uses_0_3_pct_sell_tax(cost_model: TaiwanCostModel) -> None
         )
 
     sell = result.trades[result.trades["side"] == "sell"].iloc[0]
-    expected_tax = sell["notional"] * cost_model.stock_sell_tax
-    assert abs(sell["tax"] - expected_tax) < 0.01
+    expected_tax = math.floor(sell["notional"] * cost_model.stock_sell_tax)
+    assert sell["tax"] == expected_tax
 
 
 # ─── Short-history ticker handling ────────────────────────────────────────────

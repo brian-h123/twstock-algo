@@ -1,10 +1,11 @@
 import pathlib
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from twstock.data.sources.base import NoDataError, SourceUnavailableError
-from twstock.data.sources.twse import TWSESource
+from twstock.data.sources.twse import TWSESource, fetch_suspension_halts
 
 
 @pytest.fixture
@@ -66,3 +67,42 @@ def test_list_universe_returns_top50(source):
     universe = source.list_universe()
     assert len(universe) == 50
     assert all(len(t) == 4 and t.isdigit() for t in universe)
+
+
+# ---------------------------------------------------------------------------
+# fetch_suspension_halts (TWTAWU) — not part of the DataSource interface
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.vcr
+def test_fetch_suspension_halts_returns_valid_columns():
+    # cassette: 2026-05-10..05-16, TWTAWU bulk response, 23 raw rows
+    df = fetch_suspension_halts(date(2026, 5, 10), date(2026, 5, 16))
+    assert {"ticker", "halt_date", "resume_date", "source"}.issubset(df.columns)
+    assert (df["source"] == "TWTAWU").all()
+    assert (df["resume_date"] > df["halt_date"]).all()
+
+
+@pytest.mark.vcr
+def test_fetch_suspension_halts_converts_roc_dates():
+    # cassette row: ticker 2392, ROC 115/05/13 -> 8:00 -> ROC 115/05/14
+    df = fetch_suspension_halts(date(2026, 5, 10), date(2026, 5, 16))
+    row = df[df["ticker"] == "2392"].iloc[0]
+    assert row["halt_date"] == pd.Timestamp("2026-05-13")
+    assert row["resume_date"] == pd.Timestamp("2026-05-14")
+
+
+@pytest.mark.vcr
+def test_fetch_suspension_halts_drops_still_halted_rows(capsys):
+    # cassette has 23 raw rows; ticker 040421 has an empty resume_date
+    # (halted, never resumed -- an expired warrant) and must be dropped.
+    df = fetch_suspension_halts(date(2026, 5, 10), date(2026, 5, 16))
+    assert "040421" not in set(df["ticker"])
+    assert len(df) == 22
+    assert "dropped 1" in capsys.readouterr().err
+
+
+@pytest.mark.vcr
+def test_fetch_suspension_halts_source_unavailable_raises():
+    with pytest.raises(SourceUnavailableError):
+        fetch_suspension_halts(date(2026, 1, 1), date(2026, 1, 2))
